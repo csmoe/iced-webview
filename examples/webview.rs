@@ -4,6 +4,7 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{Center, Element, Fill, Function, Subscription, Task, Theme, Vector};
+use iced_webview::{launch, pre_init};
 use std::sync::Mutex;
 
 use cef::ImplView;
@@ -15,45 +16,7 @@ use std::collections::BTreeMap;
 mod icy_cef;
 
 fn main() -> iced::Result {
-    let _ = cef::api_hash(sys::CEF_API_VERSION_LAST, 0);
-
-    let args = Args::new();
-    let cmd = args.as_cmd_line().unwrap();
-
-    let sandbox = SandboxInfo::new();
-
-    let switch = CefString::from("type");
-    let is_browser_process = cmd.has_switch(Some(&switch)) != 1;
-    let window = std::sync::Arc::new(Mutex::new(None));
-    let mut app = icy_cef::DemoApp::new(window.clone());
-
-    let ret = cef::execute_process(
-        Some(args.as_main_args()),
-        Some(&mut app),
-        sandbox.as_mut_ptr(),
-    );
-
-    if is_browser_process {
-        println!("launch browser process");
-        assert!(ret == -1, "cannot execute browser process");
-    } else {
-        let process_type = CefString::from(&cmd.get_switch_value(Some(&switch)));
-        println!("launch process {process_type}");
-        assert!(ret >= 0, "cannot execute non-browser process");
-        // non-browser process does not initialize cef
-        return Ok(());
-    }
-
-    let settings = cef::Settings::default();
-    assert_eq!(
-        cef::initialize(
-            Some(args.as_main_args()),
-            Some(&settings),
-            Some(&mut app),
-            sandbox.as_mut_ptr()
-        ),
-        1
-    );
+    pre_init().unwrap();
 
     iced::daemon(Example::new, Example::update, Example::view)
         .subscription(Example::subscription)
@@ -85,13 +48,13 @@ enum Message {
     TitleChanged(window::Id, String),
     TickCef,
     Created(window::Id),
-    Done,
+    Done(browserId),
 }
 
 impl Example {
     fn new() -> (Self, Task<Message>) {
+        iced_webview::init().unwrap();
         let (_id, open) = window::open(window::Settings::default());
-
         (
             Self {
                 windows: BTreeMap::new(),
@@ -119,80 +82,18 @@ impl Example {
                 };
                 Task::none()
             }
-            Message::Created(id) => {
-                println!("webview created");
-                window::run_with_handle(id, |handle| {
-                    let hwnd = handle.as_raw();
-                    let hwnd = match hwnd {
-                        RawWindowHandle::Win32(Win32WindowHandle { hwnd, .. }) => hwnd,
-                        _ => panic!("unsupported window handle"),
-                    };
-                    let mut client = icy_cef::DemoClient::new();
-                    let url = CefString::from("https://www.bing.com");
+            Message::Created(rx) => {
 
-                    let window_info = cef::WindowInfo {
-                        parent_window: cef::sys::HWND(hwnd.get() as _),
-                        bounds: cef::Rect {
-                            x: 500,
-                            y: 300,
-                            width: 800,
-                            height: 600,
-                        },
-                        ..Default::default()
-                    };
-                    let mut browser = cef::browser_host_create_browser_sync(
-                        Some(&window_info),
-                        Some(&mut client),
-                        Some(&url),
-                        Some(&Default::default()),
-                        Option::<&mut cef::DictionaryValue>::None,
-                        Option::<&mut cef::RequestContext>::None,
-                    )
-                    .unwrap();
-                    dbg!(browser.get_host().unwrap().has_view());
-                    let view = cef::browser_view_get_for_browser(Some(&mut browser)).unwrap();
-                    dbg!(view.get_preferred_size().height);
-                    view.set_visible(true as _);
-                    Message::Done
-                })
+            Task::perform(rx, |id| Message::Done(id))
             }
-            Message::Done => {
+            Message::Done(id) => {
                 println!("webview done");
                 Task::none()
             }
             Message::WindowOpened(id) => window::run_with_handle(id, move |handle| {
-                let hwnd = handle.as_raw();
-                let hwnd = match hwnd {
-                    RawWindowHandle::Win32(Win32WindowHandle { hwnd, .. }) => hwnd,
-                    _ => panic!("unsupported window handle"),
-                };
-                let mut client = icy_cef::DemoClient::new();
-                let url = CefString::from("https://www.testufo.com");
-
-                let window_info = cef::WindowInfo {
-                    parent_window: cef::sys::HWND(hwnd.get() as _),
-                    bounds: cef::Rect {
-                        x: 500,
-                        y: 300,
-                        width: 800,
-                        height: 600,
-                    },
-                    ..Default::default()
-                };
-                let mut browser = cef::browser_host_create_browser_sync(
-                    Some(&window_info),
-                    Some(&mut client),
-                    Some(&url),
-                    Some(&Default::default()),
-                    Option::<&mut cef::DictionaryValue>::None,
-                    Option::<&mut cef::RequestContext>::None,
-                )
-                .unwrap();
-                dbg!(browser.get_host().unwrap().has_view());
-                let view = cef::browser_view_get_for_browser(Some(&mut browser)).unwrap();
-                view.set_visible(true as _);
-                Message::Created(id)
-            }),
+                let point = iced::Point::new(100, 200);let size =  iced::Size::new(800, 600);
+                launch(handle.as_raw(), (point, size), "https://www.testufo.com".parse().unwrap()).unwrap()
+            }).map(Message::Created),
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
 

@@ -7,13 +7,14 @@ use cef::ImplBrowser;
 use cef::ImplView;
 use iced::wgpu::rwh::RawWindowHandle;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::oneshot;
 use url::Url;
 
-pub async fn launch(
+pub fn launch(
     window: RawWindowHandle,
-    bound: (iced::Point, iced::Size),
+    bound: (iced::Point<i32>, iced::Size<i32>),
     url: Url,
-) -> anyhow::Result<BrowserId> {
+) -> anyhow::Result<oneshot::Receiver<LifeSpanEvent>> {
     let (point, size) = bound;
     let parent = match window {
         #[cfg(target_os = "windows")]
@@ -53,10 +54,8 @@ pub async fn launch(
         load_rx,
         lifespan_rxs: (create_rx, close_rx),
     } = client;
-    let LifeSpanEvent::Created { browser_id } = create_rx.await? else {
-        anyhow::bail!("cannot create browser");
-    };
-    Ok(browser_id)
+
+    Ok(create_rx)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

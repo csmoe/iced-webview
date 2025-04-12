@@ -6,6 +6,7 @@ use cef::CefStringUtf8;
 use cef::ImplBrowser;
 use cef::ImplView;
 use iced::wgpu::rwh::RawWindowHandle;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use url::Url;
@@ -14,7 +15,7 @@ pub fn launch(
     window: RawWindowHandle,
     bound: (iced::Point<i32>, iced::Size<i32>),
     url: Url,
-) -> anyhow::Result<oneshot::Receiver<LifeSpanEvent>> {
+) -> anyhow::Result<Receiver<LifeSpanEvent>> {
     let (point, size) = bound;
     let parent = match window {
         #[cfg(target_os = "windows")]
@@ -52,10 +53,10 @@ pub fn launch(
     }
     let IcyClient {
         load_rx,
-        lifespan_rxs: (create_rx, close_rx),
+        lifespan_rx,
     } = client;
 
-    Ok(create_rx)
+    Ok(lifespan_rx)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

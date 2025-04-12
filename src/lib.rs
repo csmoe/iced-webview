@@ -6,6 +6,8 @@ mod browser;
 mod settings;
 mod webview;
 
+pub use backend::BrowserId;
+pub use backend::LifeSpanEvent;
 pub use webview::WebView;
 pub use webview::launch;
 

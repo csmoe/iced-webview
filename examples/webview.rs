@@ -4,8 +4,10 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{Center, Element, Fill, Function, Subscription, Task, Theme, Vector};
-use iced_webview::{launch, pre_init};
+use iced_webview::{BrowserId, LifeSpanEvent, launch, pre_init};
+use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::mpsc::Receiver;
 
 use cef::ImplView;
 use cef::{CefString, ImplCommandLine, args::Args, sandbox_info::SandboxInfo};
@@ -47,8 +49,8 @@ enum Message {
     ScaleChanged(window::Id, String),
     TitleChanged(window::Id, String),
     TickCef,
-    Created(window::Id),
-    Done(browserId),
+    Created(Arc<Receiver<LifeSpanEvent>>),
+    Done(BrowserId),
 }
 
 impl Example {
@@ -83,17 +85,30 @@ impl Example {
                 Task::none()
             }
             Message::Created(rx) => {
-
-            Task::perform(rx, |id| Message::Done(id))
+                print!("created");
+                Task::none()
+                //Task::perform(async move { rx.recv().await }, |id| id).map(|event| match event {
+                //    Some(LifeSpanEvent::Created { browser_id }) => Message::Done(browser_id),
+                //    _ => Message::Done(0.into()),
+                //})
             }
             Message::Done(id) => {
                 println!("webview done");
                 Task::none()
             }
             Message::WindowOpened(id) => window::run_with_handle(id, move |handle| {
-                let point = iced::Point::new(100, 200);let size =  iced::Size::new(800, 600);
-                launch(handle.as_raw(), (point, size), "https://www.testufo.com".parse().unwrap()).unwrap()
-            }).map(Message::Created),
+                let point = iced::Point::new(100, 200);
+                let size = iced::Size::new(800, 600);
+                Arc::new(
+                    launch(
+                        handle.as_raw(),
+                        (point, size),
+                        "https://www.testufo.com".parse().unwrap(),
+                    )
+                    .unwrap(),
+                )
+            })
+            .map(Message::Created),
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
 

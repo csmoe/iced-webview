@@ -12,6 +12,7 @@ use cef::LoadHandler;
 use cef::WrapClient;
 use cef::rc::*;
 use cef::sys;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 
@@ -32,27 +33,28 @@ impl BrowserId {
 
 pub struct IcyClient {
     pub(crate) load_rx: UnboundedReceiver<load::LoadEvent>,
-    pub(crate) lifespan_rxs: (
-        oneshot::Receiver<LifeSpanEvent>,
-        oneshot::Receiver<LifeSpanEvent>,
-    ),
+    pub(crate) lifespan_rx: Receiver<lifespan::LifeSpanEvent>,
+    //pub(crate) lifespan_rxs: (
+    //    oneshot::Receiver<LifeSpanEvent>,
+    //    oneshot::Receiver<LifeSpanEvent>,
+    //),
 }
 
 impl IcyClient {
     pub fn new() -> (Self, IcyClientHandlers) {
         let (load_tx, load_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (create_tx, create_rx) = oneshot::channel();
-        let (close_tx, close_rx) = oneshot::channel();
-
+        //let (create_tx, create_rx) = oneshot::channel();
+        //let (close_tx, close_rx) = oneshot::channel();
+        let (lifespan_tx, lifespan_rx) = tokio::sync::mpsc::channel(2);
         let client = IcyClient {
             load_rx,
-            lifespan_rxs: (create_rx, close_rx),
+            lifespan_rx,
         };
 
         let handlers = IcyClientHandlers {
             context_menu: context_menu::IcyContextMenuHandler::new(),
             load: load::IcyLoadHandler::new(load_tx),
-            lifespan: lifespan::IcyLifeSpanHandler::new(create_tx, close_tx),
+            lifespan: lifespan::IcyLifeSpanHandler::new(lifespan_tx),
         };
         (client, handlers)
     }

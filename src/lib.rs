@@ -1,9 +1,13 @@
 use browser::{AppBuilder, IcyBrowserProcessHandler};
 use cef::ImplCommandLine;
 
+mod backend;
 mod browser;
 mod settings;
-mod webrender;
+mod webview;
+
+pub use webview::WebView;
+pub use webview::launch;
 
 pub fn pre_init() -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]

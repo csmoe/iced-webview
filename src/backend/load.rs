@@ -173,9 +173,9 @@ impl ImplLoadHandler for LoadHandlerBuilder {
         if let Err(err) = self.handler.tx.send(LoadEvent::Error {
             browser_id: Some(browser.get_identifier().into()),
             frame_id: frame.and_then(|f| {
-                (CefStringUtf8::from(&CefString::from(&f.get_identifier()))
+                CefStringUtf8::from(&CefString::from(&f.get_identifier()))
                     .as_str()
-                    .map(str::to_string))
+                    .map(str::to_string)
             }),
             error_code: (*error_code.as_ref()) as _,
             error_text: error_text

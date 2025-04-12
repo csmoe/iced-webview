@@ -10,6 +10,8 @@ tracing = "0.1"
 tokio = { version = "1", features = ["sync"] }
 anyhow = "1"
 camino = "1"
+url = "2"
+atomic-take = "1"
 
 [[example]]
 name = "webview"

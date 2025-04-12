@@ -3,7 +3,8 @@ use cef::LifeSpanHandler;
 use cef::WrapLifeSpanHandler;
 use cef::rc::*;
 use cef::sys;
-use tokio::sync::mpsc::Sender;
+use std::sync::Arc;
+use tokio::sync::oneshot;
 
 use super::BrowserId;
 
@@ -15,12 +16,19 @@ pub enum LifeSpanEvent {
 
 #[derive(Clone)]
 pub struct IcyLifeSpanHandler {
-    tx: Sender<LifeSpanEvent>,
+    create_tx: Arc<atomic_take::AtomicTake<oneshot::Sender<LifeSpanEvent>>>,
+    close_tx: Arc<atomic_take::AtomicTake<oneshot::Sender<LifeSpanEvent>>>,
 }
 
 impl IcyLifeSpanHandler {
-    pub fn new(tx: Sender<LifeSpanEvent>) -> Self {
-        Self { tx }
+    pub fn new(
+        create_tx: oneshot::Sender<LifeSpanEvent>,
+        close_tx: oneshot::Sender<LifeSpanEvent>,
+    ) -> Self {
+        Self {
+            create_tx: Arc::new(atomic_take::AtomicTake::new(create_tx)),
+            close_tx: Arc::new(atomic_take::AtomicTake::new(close_tx)),
+        }
     }
 }
 
@@ -77,9 +85,15 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Created {
-            browser_id: browser.get_identifier().into(),
-        }) {
+        if let Err(err) = self
+            .handler
+            .create_tx
+            .take()
+            .unwrap()
+            .send(LifeSpanEvent::Created {
+                browser_id: browser.get_identifier().into(),
+            })
+        {
             tracing::warn!(?err, "cannot send life span event");
         }
     }
@@ -88,9 +102,15 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Closed {
-            browser_id: browser.get_identifier().into(),
-        }) {
+        if let Err(err) = self
+            .handler
+            .close_tx
+            .take()
+            .unwrap()
+            .send(LifeSpanEvent::Closed {
+                browser_id: browser.get_identifier().into(),
+            })
+        {
             tracing::warn!(?err, "cannot send life span event");
         }
     }

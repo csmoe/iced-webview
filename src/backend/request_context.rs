@@ -54,7 +54,7 @@ impl Clone for RequestContextHandlerBuilder {
 
 impl ImplRequestContextHandler for RequestContextHandlerBuilder {
     fn get_raw(&self) -> *mut sys::_cef_request_context_handler_t {
-        unsafe { self.object.cast() }
+         self.object.cast()
     }
 
     fn on_request_context_initialized(

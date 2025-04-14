@@ -6,6 +6,7 @@ use crate::backend::LifeSpanEvent;
 use crate::backend::RequestContextHandlerBuilder;
 use cef::ImplBrowser;
 use cef::ImplView;
+use iced::Size;
 use iced::wgpu::rwh::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 use url::Url;
@@ -37,7 +38,10 @@ pub fn launch(
         ..Default::default()
     };
     let (client, handlers) = IcyClient::new();
-    let browser_settings = cef::BrowserSettings::default();
+    let browser_settings = cef::BrowserSettings {
+        default_encoding: cef::CefString::from("UTF-8"),
+        ..Default::default()
+    };
     let mut cef_client = ClientBuilder::build(handlers);
     let mut request_context = cef::request_context_create_context(
         Some(&cef::RequestContextSettings::default()),
@@ -136,11 +140,11 @@ impl WebView {
         }
     }
 
-    pub fn resize(&mut self, width: i32, height: i32) {
+    pub fn resize(&mut self, size: Size) {
         if let Some(view) = self.view() {
             view.set_size(Some(&cef::Size {
-                width: width as _,
-                height: height as _,
+                width: size.width as _,
+                height: size.height as _,
             }));
         }
     }

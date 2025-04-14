@@ -9,6 +9,7 @@ use cef::sys;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 pub enum LoadEvent {
     Changed {
         browser_id: Option<BrowserId>,

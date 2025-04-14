@@ -1,4 +1,3 @@
-use cef::CefString;
 use cef::ContextMenuHandler;
 use cef::ImplContextMenuHandler;
 use cef::WrapContextMenuHandler;

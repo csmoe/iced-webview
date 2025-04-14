@@ -3,9 +3,7 @@ use cef::LifeSpanHandler;
 use cef::WrapLifeSpanHandler;
 use cef::rc::*;
 use cef::sys;
-use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot;
 
 use super::BrowserId;
 

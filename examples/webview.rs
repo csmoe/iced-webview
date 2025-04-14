@@ -9,8 +9,6 @@ use tokio::sync::mpsc::Receiver;
 
 use std::collections::BTreeMap;
 
-mod icy_cef;
-
 fn main() -> iced::Result {
     pre_init().unwrap();
 
@@ -78,16 +76,14 @@ impl Example {
                 };
                 Task::none()
             }
-            Message::Created(rx) => {
-                print!("created");
-                Task::none()
-                //Task::perform(async move { rx.recv().await }, |id| id).map(|event| match event {
-                //    Some(LifeSpanEvent::Created { browser_id }) => Message::Done(browser_id),
-                //    _ => Message::Done(0.into()),
-                //})
+            Message::Created(mut rx) => {
+                Task::perform(async move { Arc::get_mut(&mut rx).unwrap().recv().await }, |id| id).map(|event| match event {
+                    Some(LifeSpanEvent::Created { browser_id }) => Message::Done(browser_id),
+                    _ => Message::Done(0.into()),
+                })
             }
             Message::Done(id) => {
-                println!("webview done");
+                println!("webview done {id:?}");
                 Task::none()
             }
             Message::WindowOpened(id) => window::get_position(id)

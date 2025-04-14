@@ -30,8 +30,8 @@ impl CefSettings {
             cache_path,
             user_agent,
             locale,
-            log_severity,
             log_file_path,
+            ..
         } = self;
         let settings = cef::Settings {
             persist_session_cookies: true as _,

@@ -1,4 +1,3 @@
-use iced::wgpu::rwh::{RawWindowHandle, Win32WindowHandle};
 use iced::widget::{
     button, center, center_x, column, container, horizontal_space, scrollable, text, text_input,
 };
@@ -6,12 +5,7 @@ use iced::window;
 use iced::{Center, Element, Fill, Function, Subscription, Task, Theme, Vector};
 use iced_webview::{BrowserId, LifeSpanEvent, launch, pre_init};
 use std::sync::Arc;
-use std::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
-
-use cef::ImplView;
-use cef::{CefString, ImplCommandLine, args::Args, sandbox_info::SandboxInfo};
-use cef::{ImplBrowser, ImplBrowserHost, sys};
 
 use std::collections::BTreeMap;
 
@@ -96,19 +90,22 @@ impl Example {
                 println!("webview done");
                 Task::none()
             }
-            Message::WindowOpened(id) => window::run_with_handle(id, move |handle| {
-                let point = iced::Point::new(100, 200);
-                let size = iced::Size::new(800, 600);
-                Arc::new(
-                    launch(
-                        handle.as_raw(),
-                        (point, size),
-                        "https://www.testufo.com".parse().unwrap(),
-                    )
-                    .unwrap(),
-                )
-            })
-            .map(Message::Created),
+            Message::WindowOpened(id) => window::get_position(id)
+                .then(move |position| {
+                    window::get_size(id).then(move |size| {
+                        window::run_with_handle(id, move |handle| {
+                            Arc::new(
+                                launch(
+                                    handle.as_raw(),
+                                    (position.unwrap(), size),
+                                    "https://www.testufo.com".parse().unwrap(),
+                                )
+                                .unwrap(),
+                            )
+                        })
+                    })
+                })
+                .map(Message::Created),
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
 

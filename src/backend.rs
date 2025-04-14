@@ -1,8 +1,11 @@
 mod context_menu;
 mod lifespan;
 mod load;
+mod request_context;
 
 pub use lifespan::LifeSpanEvent;
+pub(crate) use request_context::IcyRequestContextHandler;
+pub(crate) use request_context::RequestContextHandlerBuilder;
 
 use cef::Client;
 use cef::ContextMenuHandler;
@@ -14,7 +17,6 @@ use cef::rc::*;
 use cef::sys;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::oneshot;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash, Ord)]
 pub struct BrowserId(i32);

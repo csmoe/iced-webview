@@ -1,19 +1,18 @@
 use crate::backend::BrowserId;
 use crate::backend::ClientBuilder;
 use crate::backend::IcyClient;
+use crate::backend::IcyRequestContextHandler;
 use crate::backend::LifeSpanEvent;
-use cef::CefStringUtf8;
+use crate::backend::RequestContextHandlerBuilder;
 use cef::ImplBrowser;
 use cef::ImplView;
 use iced::wgpu::rwh::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::oneshot;
 use url::Url;
 
 pub fn launch(
     window: RawWindowHandle,
-    bound: (iced::Point<i32>, iced::Size<i32>),
+    bound: (iced::Point, iced::Size),
     url: Url,
 ) -> anyhow::Result<Receiver<LifeSpanEvent>> {
     let (point, size) = bound;
@@ -40,13 +39,19 @@ pub fn launch(
     let (client, handlers) = IcyClient::new();
     let browser_settings = cef::BrowserSettings::default();
     let mut cef_client = ClientBuilder::build(handlers);
+    let mut request_context = cef::request_context_create_context(
+        Some(&cef::RequestContextSettings::default()),
+        Some(&mut RequestContextHandlerBuilder::build(
+            IcyRequestContextHandler {},
+        )),
+    );
     let ret = cef::browser_host_create_browser(
         Some(&window_info),
         Some(&mut cef_client),
         Some(&url.as_str().into()),
         Some(&browser_settings),
         Option::<&mut cef::DictionaryValue>::None,
-        Option::<&mut cef::RequestContext>::None,
+        request_context.as_mut(),
     );
     if ret != 1 {
         anyhow::bail!("failed to create browser");

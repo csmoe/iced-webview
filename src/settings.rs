@@ -6,7 +6,6 @@ pub struct CefSettings {
     cache_path: Utf8PathBuf,
     user_agent: String,
     locale: Option<String>,
-    log_severity: Option<String>,
     log_file_path: Utf8PathBuf,
 }
 
@@ -37,7 +36,7 @@ impl CefSettings {
             persist_session_cookies: true as _,
             cache_path: cache_path.as_str().into(),
             user_agent: user_agent.as_str().into(),
-            accept_language_list: locale.unwrap_or("zh-CN".into()).as_str().into(),
+            accept_language_list: locale.unwrap_or("en-US".into()).as_str().into(),
             log_file: log_file_path.as_str().into(),
             ..Default::default()
         };

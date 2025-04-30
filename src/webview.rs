@@ -15,14 +15,14 @@ pub fn launch(
     window: RawWindowHandle,
     bound: (iced::Point, iced::Size),
     url: Url,
-) -> anyhow::Result<Receiver<LifeSpanEvent>> {
+) -> crate::Result<Receiver<LifeSpanEvent>> {
     let (point, size) = bound;
     let parent = match window {
         #[cfg(target_os = "windows")]
         RawWindowHandle::Win32(handle) => handle.hwnd.get(),
         #[cfg(target_os = "macos")]
-        RawWindowHandle::AppKit(handle) => handle.ns_view.get(),
-        _ => anyhow::bail!("unsupported window handle"),
+        RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
+        _ => return Err(crate::Error::Custom("unsupported window handle".into())),
     };
     let window_info = cef::WindowInfo {
         bounds: cef::Rect {
@@ -58,7 +58,7 @@ pub fn launch(
         request_context.as_mut(),
     );
     if ret != 1 {
-        anyhow::bail!("failed to create browser");
+        return Err(crate::error::Error::CannotCreateBrowser);
     }
     let IcyClient {
         load_rx,
@@ -150,7 +150,7 @@ impl WebView {
     }
 
     fn host(&self) -> Option<cef::BrowserHost> {
-        self.browser.get_host()
+        self.browser.host()
     }
 
     fn view(&mut self) -> Option<cef::BrowserView> {

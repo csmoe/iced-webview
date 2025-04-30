@@ -71,9 +71,6 @@ impl ImplApp for AppBuilder {
         process_type: Option<&cef::CefString>,
         command_line: Option<&mut impl cef::ImplCommandLine>,
     ) {
-        if let Some(_process_type) = process_type {
-            tracing::info!("on_before_command_line_processing");
-        }
         let Some(command_line) = command_line else {
             return;
         };
@@ -89,6 +86,7 @@ impl ImplApp for AppBuilder {
         command_line.append_switch(Some(&"use-mock-keychain".into()));
         command_line.append_switch(Some(&"ignore-certificate-errors".into()));
         command_line.append_switch(Some(&"disable-spell-checking".into()));
+        tracing::debug!("preset command line args done");
     }
 }
 
@@ -162,7 +160,7 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         if let Err(err) = self.handler.tx.send(BrowserProcessMessage::Ready) {
             tracing::warn!(?err, "cannot send browser process message");
         } else {
-            tracing::info!("cef context intialized");
+            tracing::debug!("cef context intialized");
         }
     }
 
@@ -176,18 +174,8 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
         command_line.append_switch(Some(&"disable-chrome-login-prompt".into()));
         command_line.append_switch(Some(&"allow-running-insecure-content".into()));
-        //command_line.append_switch(Some(&"no-startup-window".into()));
-        //command_line.append_switch(Some(&"disable-popup-blocking".into()));
-        //command_line.append_switch(Some(&"noerrdialogs".into()));
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
         command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
-        //command_line.append_switch(Some(&"disable-gpu".into()));
-        //command_line.append_switch(Some(&"disable-gpu-compositing".into()));
-        command_line.append_switch(Some(&"ignore-certificate-errors".into()));
-        command_line.append_switch(Some(&"ignore-ssl-errors".into()));
-        //command_line.append_switch(Some(&"--use-gl=angle".into()));
-        //command_line.append_switch(Some(&"--use-angle=swiftshader".into()));
-        //command_line.append_switch(Some(&"enable-unsafe-swiftshader".into()));
     }
 
     fn on_schedule_message_pump_work(&self, delay_ms: i64) {

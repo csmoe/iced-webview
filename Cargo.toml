@@ -4,14 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cef = { git = "https://github.com/csmoe/tauri-cef-rs", branch = "fix-param" }
+cef = "135"
 iced = { git = "https://github.com/iced-rs/iced", branch = "master", features = ["tokio", "advanced"] }
 tracing = "0.1"
 tokio = { version = "1", features = ["sync"] }
-anyhow = "1"
 camino = "1"
 url = "2"
 atomic-take = "1"
+thiserror = "1"
+
+[dev-dependencies]
+anyhow = "1"
 
 [[example]]
 name = "webview"

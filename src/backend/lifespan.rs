@@ -78,7 +78,7 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
             return;
         };
         if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Created {
-            browser_id: browser.get_identifier().into(),
+            browser_id: browser.identifier().into(),
         }) {
             tracing::warn!(?err, "cannot send life span event");
         }
@@ -89,7 +89,7 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
             return;
         };
         if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Closed {
-            browser_id: browser.get_identifier().into(),
+            browser_id: browser.identifier().into(),
         }) {
             tracing::warn!(?err, "cannot send life span event");
         }

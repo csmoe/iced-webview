@@ -128,15 +128,15 @@ impl ImplClient for ClientBuilder {
         self.object.cast()
     }
 
-    fn get_context_menu_handler(&self) -> Option<ContextMenuHandler> {
+    fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
         Some(self.context_menu.clone())
     }
 
-    fn get_life_span_handler(&self) -> Option<LifeSpanHandler> {
+    fn life_span_handler(&self) -> Option<LifeSpanHandler> {
         Some(self.lifespan.clone())
     }
 
-    fn get_load_handler(&self) -> Option<LoadHandler> {
+    fn load_handler(&self) -> Option<LoadHandler> {
         Some(self.load.clone())
     }
 }

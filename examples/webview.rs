@@ -3,14 +3,14 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{Center, Element, Fill, Function, Subscription, Task, Theme, Vector};
-use iced_webview::{BrowserId, LifeSpanEvent, launch, pre_init};
+use iced_webview::{BrowserId, LifeSpanEvent, init_cef, launch, pre_init_cef};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 use std::collections::BTreeMap;
 
 fn main() -> iced::Result {
-    pre_init().unwrap();
+    let _pre = pre_init_cef();
 
     iced::daemon(Example::new, Example::update, Example::view)
         .subscription(Example::subscription)
@@ -47,7 +47,7 @@ enum Message {
 
 impl Example {
     fn new() -> (Self, Task<Message>) {
-        iced_webview::init().unwrap();
+        init_cef().unwrap();
         let (_id, open) = window::open(window::Settings::default());
         (
             Self {
@@ -76,12 +76,14 @@ impl Example {
                 };
                 Task::none()
             }
-            Message::Created(mut rx) => {
-                Task::perform(async move { Arc::get_mut(&mut rx).unwrap().recv().await }, |id| id).map(|event| match event {
-                    Some(LifeSpanEvent::Created { browser_id }) => Message::Done(browser_id),
-                    _ => Message::Done(0.into()),
-                })
-            }
+            Message::Created(mut rx) => Task::perform(
+                async move { Arc::get_mut(&mut rx).unwrap().recv().await },
+                |id| id,
+            )
+            .map(|event| match event {
+                Some(LifeSpanEvent::Created { browser_id }) => Message::Done(browser_id),
+                _ => Message::Done(0.into()),
+            }),
             Message::Done(id) => {
                 println!("webview done {id:?}");
                 Task::none()

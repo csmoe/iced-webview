@@ -107,7 +107,7 @@ impl ImplLoadHandler for LoadHandlerBuilder {
             return;
         };
         if let Err(err) = self.handler.tx.send(LoadEvent::Changed {
-            browser_id: Some(browser.get_identifier().into()),
+            browser_id: Some(browser.identifier().into()),
             is_loading: is_loading != 0,
             can_go_back: can_go_back != 0,
             can_go_forward: can_go_forward != 0,
@@ -126,9 +126,9 @@ impl ImplLoadHandler for LoadHandlerBuilder {
             return;
         };
         if let Err(err) = self.handler.tx.send(LoadEvent::Start {
-            browser_id: Some(browser.get_identifier().into()),
+            browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
-                CefStringUtf8::from(&CefString::from(&f.get_identifier()))
+                CefStringUtf8::from(&CefString::from(&f.identifier()))
                     .as_str()
                     .map(str::to_string)
             }),
@@ -148,9 +148,9 @@ impl ImplLoadHandler for LoadHandlerBuilder {
             return;
         };
         if let Err(err) = self.handler.tx.send(LoadEvent::End {
-            browser_id: Some(browser.get_identifier().into()),
+            browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
-                CefStringUtf8::from(&CefString::from(&f.get_identifier()))
+                CefStringUtf8::from(&CefString::from(&f.identifier()))
                     .as_str()
                     .map(str::to_string)
             }),
@@ -172,9 +172,9 @@ impl ImplLoadHandler for LoadHandlerBuilder {
             return;
         };
         if let Err(err) = self.handler.tx.send(LoadEvent::Error {
-            browser_id: Some(browser.get_identifier().into()),
+            browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
-                CefStringUtf8::from(&CefString::from(&f.get_identifier()))
+                CefStringUtf8::from(&CefString::from(&f.identifier()))
                     .as_str()
                     .map(str::to_string)
             }),

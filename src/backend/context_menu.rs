@@ -1,33 +1,31 @@
 use cef::ContextMenuHandler;
 use cef::ImplContextMenuHandler;
+use cef::ImplMenuModel;
 use cef::WrapContextMenuHandler;
 use cef::rc::*;
 use cef::sys;
 
-#[derive(Clone)]
-pub struct IcyContextMenuHandler {}
-
 impl IcyContextMenuHandler {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            object: std::ptr::null_mut(),
+        }
     }
 }
 
-pub(crate) struct ContextMenuHandlerBuilder {
+pub(crate) struct IcyContextMenuHandler {
     object: *mut RcImpl<sys::cef_context_menu_handler_t, Self>,
-    handler: IcyContextMenuHandler,
 }
 
-impl ContextMenuHandlerBuilder {
+impl IcyContextMenuHandler {
     pub(crate) fn build(handler: IcyContextMenuHandler) -> ContextMenuHandler {
         ContextMenuHandler::new(Self {
             object: std::ptr::null_mut(),
-            handler,
         })
     }
 }
 
-impl Rc for ContextMenuHandlerBuilder {
+impl Rc for IcyContextMenuHandler {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -36,13 +34,13 @@ impl Rc for ContextMenuHandlerBuilder {
     }
 }
 
-impl WrapContextMenuHandler for ContextMenuHandlerBuilder {
+impl WrapContextMenuHandler for IcyContextMenuHandler {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_context_menu_handler_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for ContextMenuHandlerBuilder {
+impl Clone for IcyContextMenuHandler {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -50,24 +48,21 @@ impl Clone for ContextMenuHandlerBuilder {
             rc_impl
         };
 
-        Self {
-            object,
-            handler: self.handler.clone(),
-        }
+        Self { object }
     }
 }
 
-impl ImplContextMenuHandler for ContextMenuHandlerBuilder {
+impl ImplContextMenuHandler for IcyContextMenuHandler {
     fn get_raw(&self) -> *mut sys::_cef_context_menu_handler_t {
         self.object.cast()
     }
 
     fn on_before_context_menu(
         &self,
-        _browser: Option<&mut impl cef::ImplBrowser>,
-        _frame: Option<&mut impl cef::ImplFrame>,
-        _params: Option<&mut impl cef::ImplContextMenuParams>,
-        model: Option<&mut impl cef::ImplMenuModel>,
+        _browser: Option<&mut cef::Browser>,
+        _frame: Option<&mut cef::Frame>,
+        _params: Option<&mut cef::ContextMenuParams>,
+        model: Option<&mut cef::MenuModel>,
     ) {
         if let Some(model) = model {
             model.clear();

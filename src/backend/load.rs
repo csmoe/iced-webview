@@ -1,11 +1,14 @@
 use super::BrowserId;
 use cef::CefString;
 use cef::CefStringUtf8;
+use cef::ImplBrowser;
+use cef::ImplFrame;
 use cef::ImplLoadHandler;
 use cef::LoadHandler;
 use cef::WrapLoadHandler;
 use cef::rc::*;
 use cef::sys;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Clone, Debug)]
@@ -36,32 +39,29 @@ pub enum LoadEvent {
     },
 }
 
-#[derive(Clone)]
-pub struct IcyLoadHandler {
+impl IcyLoadHandler {
+    pub fn new() -> (Self, UnboundedReceiver<LoadEvent>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (
+            Self {
+                object: std::ptr::null_mut(),
+                tx,
+            },
+            rx,
+        )
+    }
+
+    pub fn into_cef_handler(self) -> LoadHandler {
+        LoadHandler::new(self)
+    }
+}
+
+pub(crate) struct IcyLoadHandler {
+    object: *mut RcImpl<sys::cef_load_handler_t, Self>,
     tx: UnboundedSender<LoadEvent>,
 }
 
-impl IcyLoadHandler {
-    pub fn new(tx: UnboundedSender<LoadEvent>) -> Self {
-        Self { tx }
-    }
-}
-
-pub(crate) struct LoadHandlerBuilder {
-    object: *mut RcImpl<sys::cef_load_handler_t, Self>,
-    handler: IcyLoadHandler,
-}
-
-impl LoadHandlerBuilder {
-    pub(crate) fn build(handler: IcyLoadHandler) -> LoadHandler {
-        LoadHandler::new(Self {
-            object: std::ptr::null_mut(),
-            handler,
-        })
-    }
-}
-
-impl Rc for LoadHandlerBuilder {
+impl Rc for IcyLoadHandler {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -70,13 +70,13 @@ impl Rc for LoadHandlerBuilder {
     }
 }
 
-impl WrapLoadHandler for LoadHandlerBuilder {
+impl WrapLoadHandler for IcyLoadHandler {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_load_handler_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for LoadHandlerBuilder {
+impl Clone for IcyLoadHandler {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -86,19 +86,19 @@ impl Clone for LoadHandlerBuilder {
 
         Self {
             object,
-            handler: self.handler.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
 
-impl ImplLoadHandler for LoadHandlerBuilder {
+impl ImplLoadHandler for IcyLoadHandler {
     fn get_raw(&self) -> *mut sys::_cef_load_handler_t {
         self.object.cast()
     }
 
     fn on_loading_state_change(
         &self,
-        browser: Option<&mut impl cef::ImplBrowser>,
+        browser: Option<&mut cef::Browser>,
         is_loading: ::std::os::raw::c_int,
         can_go_back: ::std::os::raw::c_int,
         can_go_forward: ::std::os::raw::c_int,
@@ -106,7 +106,7 @@ impl ImplLoadHandler for LoadHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.send(LoadEvent::Changed {
+        if let Err(err) = self.tx.send(LoadEvent::Changed {
             browser_id: Some(browser.identifier().into()),
             is_loading: is_loading != 0,
             can_go_back: can_go_back != 0,
@@ -118,14 +118,14 @@ impl ImplLoadHandler for LoadHandlerBuilder {
 
     fn on_load_start(
         &self,
-        browser: Option<&mut impl cef::ImplBrowser>,
-        frame: Option<&mut impl cef::ImplFrame>,
+        browser: Option<&mut cef::Browser>,
+        frame: Option<&mut cef::Frame>,
         transition_type: cef::TransitionType,
     ) {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.send(LoadEvent::Start {
+        if let Err(err) = self.tx.send(LoadEvent::Start {
             browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
                 CefStringUtf8::from(&CefString::from(&f.identifier()))
@@ -140,14 +140,14 @@ impl ImplLoadHandler for LoadHandlerBuilder {
 
     fn on_load_end(
         &self,
-        browser: Option<&mut impl cef::ImplBrowser>,
-        frame: Option<&mut impl cef::ImplFrame>,
+        browser: Option<&mut cef::Browser>,
+        frame: Option<&mut cef::Frame>,
         http_status_code: ::std::os::raw::c_int,
     ) {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.send(LoadEvent::End {
+        if let Err(err) = self.tx.send(LoadEvent::End {
             browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
                 CefStringUtf8::from(&CefString::from(&f.identifier()))
@@ -162,8 +162,8 @@ impl ImplLoadHandler for LoadHandlerBuilder {
 
     fn on_load_error(
         &self,
-        browser: Option<&mut impl cef::ImplBrowser>,
-        frame: Option<&mut impl cef::ImplFrame>,
+        browser: Option<&mut cef::Browser>,
+        frame: Option<&mut cef::Frame>,
         error_code: cef::Errorcode,
         error_text: Option<&CefString>,
         failed_url: Option<&CefString>,
@@ -171,7 +171,7 @@ impl ImplLoadHandler for LoadHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.send(LoadEvent::Error {
+        if let Err(err) = self.tx.send(LoadEvent::Error {
             browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
                 CefStringUtf8::from(&CefString::from(&f.identifier()))

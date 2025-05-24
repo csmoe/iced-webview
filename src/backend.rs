@@ -1,11 +1,16 @@
 mod context_menu;
 mod lifespan;
 mod load;
+mod render;
 mod request_context;
 
+use context_menu::IcyContextMenuHandler;
+use lifespan::IcyLifeSpanHandler;
 pub use lifespan::LifeSpanEvent;
+use load::IcyLoadHandler;
+pub use render::*;
 pub(crate) use request_context::IcyRequestContextHandler;
-pub(crate) use request_context::RequestContextHandlerBuilder;
+pub(crate) use request_context::IcyRequestContextHandler;
 
 use cef::Client;
 use cef::ContextMenuHandler;
@@ -33,17 +38,8 @@ impl BrowserId {
     }
 }
 
-pub struct IcyClient {
-    pub(crate) load_rx: UnboundedReceiver<load::LoadEvent>,
-    pub(crate) lifespan_rx: Receiver<lifespan::LifeSpanEvent>,
-    //pub(crate) lifespan_rxs: (
-    //    oneshot::Receiver<LifeSpanEvent>,
-    //    oneshot::Receiver<LifeSpanEvent>,
-    //),
-}
-
 impl IcyClient {
-    pub fn new() -> (Self, IcyClientHandlers) {
+    pub fn new() -> (Self, IcyClientState) {
         let (load_tx, load_rx) = tokio::sync::mpsc::unbounded_channel();
         //let (create_tx, create_rx) = oneshot::channel();
         //let (close_tx, close_rx) = oneshot::channel();
@@ -66,32 +62,39 @@ pub struct IcyClientHandlers {
     pub(crate) context_menu: context_menu::IcyContextMenuHandler,
     pub(crate) lifespan: lifespan::IcyLifeSpanHandler,
     pub(crate) load: load::IcyLoadHandler,
+    pub(crate) render: render::IcyRenderHandler,
 }
 
-pub struct ClientBuilder {
+pub struct IcyClient {
     object: *mut cef::rc::RcImpl<cef::sys::cef_client_t, Self>,
-    load: LoadHandler,
-    lifespan: LifeSpanHandler,
-    context_menu: ContextMenuHandler,
+    load: IcyLoadHandler,
+    lifespan: IcyLifeSpanHandler,
+    context_menu: IcyContextMenuHandler,
+    render: IcyRenderHandler,
+    request_context: IcyRequestContextHandler,
 }
 
-impl ClientBuilder {
-    pub fn build(handlers: IcyClientHandlers) -> Client {
-        let IcyClientHandlers {
-            context_menu,
+impl IcyClient {
+    pub fn new(device_scale_factor: f32, rect: iced::Rectangle) -> (Self, IcyClientState) {
+        let (render, render_state) = render::IcyRenderHandler::new(device_scale_factor, rect);
+        let client = IcyClient {
+            object: std::ptr::null_mut(),
+            render,
             lifespan,
             load,
-        } = handlers;
-        Client::new(Self {
-            object: std::ptr::null_mut(),
-            load: load::LoadHandlerBuilder::build(load),
-            lifespan: lifespan::LifeSpanHandlerBuilder::build(lifespan),
-            context_menu: context_menu::ContextMenuHandlerBuilder::build(context_menu),
-        })
+        };
+    }
+
+    fn into_cef_client(self) -> Client {
+        Client::new(self)
     }
 }
 
-impl Rc for ClientBuilder {
+pub struct IcyClientState {
+    render: IcyRenderState,
+}
+
+impl Rc for IcyClient {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -100,13 +103,13 @@ impl Rc for ClientBuilder {
     }
 }
 
-impl WrapClient for ClientBuilder {
+impl WrapClient for IcyClient {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_client_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for ClientBuilder {
+impl Clone for IcyClient {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -119,24 +122,26 @@ impl Clone for ClientBuilder {
             load: self.load.clone(),
             lifespan: self.lifespan.clone(),
             context_menu: self.context_menu.clone(),
+            render: self.render.clone(),
+            request_context: self.request_context.clone(),
         }
     }
 }
 
-impl ImplClient for ClientBuilder {
+impl ImplClient for IcyClient {
     fn get_raw(&self) -> *mut sys::_cef_client_t {
         self.object.cast()
     }
 
     fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
-        Some(self.context_menu.clone())
+        Some(ContextMenuHandler::new(self.context_menu.clone()))
     }
 
     fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-        Some(self.lifespan.clone())
+        Some(LifeSpanHandler::new(self.lifespan.clone()))
     }
 
     fn load_handler(&self) -> Option<LoadHandler> {
-        Some(self.load.clone())
+        Some(LoadHandler::new(self.load.clone()))
     }
 }

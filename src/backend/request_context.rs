@@ -1,5 +1,5 @@
 use cef::CefString;
-use cef::ImplRequestContext;
+use cef::ImplPreferenceManager;
 use cef::ImplRequestContextHandler;
 use cef::ImplValue;
 use cef::RequestContextHandler;
@@ -7,24 +7,24 @@ use cef::WrapRequestContextHandler;
 use cef::rc::*;
 use cef::sys;
 
-#[derive(Clone)]
-pub struct IcyRequestContextHandler {}
-
-pub(crate) struct RequestContextHandlerBuilder {
+pub(crate) struct IcyRequestContextHandler {
     object: *mut RcImpl<sys::cef_request_context_handler_t, Self>,
-    handler: IcyRequestContextHandler,
+    handler: (),
 }
 
-impl RequestContextHandlerBuilder {
-    pub(crate) fn build(handler: IcyRequestContextHandler) -> RequestContextHandler {
-        RequestContextHandler::new(Self {
-            object: std::ptr::null_mut(),
-            handler,
-        })
+impl IcyRequestContextHandler {
+    pub fn new() -> Self {
+        let handler = ();
+        let object = std::ptr::null_mut();
+        Self { object, handler }
+    }
+
+    pub(crate) fn into_cef_handler(self) -> RequestContextHandler {
+        RequestContextHandler::new(self)
     }
 }
 
-impl Rc for RequestContextHandlerBuilder {
+impl Rc for IcyRequestContextHandler {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -32,12 +32,12 @@ impl Rc for RequestContextHandlerBuilder {
         }
     }
 }
-impl WrapRequestContextHandler for RequestContextHandlerBuilder {
+impl WrapRequestContextHandler for IcyRequestContextHandler {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_request_context_handler_t, Self>) {
         self.object = object;
     }
 }
-impl Clone for RequestContextHandlerBuilder {
+impl Clone for IcyRequestContextHandler {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -52,15 +52,12 @@ impl Clone for RequestContextHandlerBuilder {
     }
 }
 
-impl ImplRequestContextHandler for RequestContextHandlerBuilder {
+impl ImplRequestContextHandler for IcyRequestContextHandler {
     fn get_raw(&self) -> *mut sys::_cef_request_context_handler_t {
-         self.object.cast()
+        self.object.cast()
     }
 
-    fn on_request_context_initialized(
-        &self,
-        request_context: Option<&mut impl ImplRequestContext>,
-    ) {
+    fn on_request_context_initialized(&self, request_context: Option<&mut cef::RequestContext>) {
         let Some(request_context) = request_context else {
             return;
         };

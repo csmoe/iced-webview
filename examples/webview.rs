@@ -16,7 +16,6 @@ fn main() -> iced::Result {
         .subscription(Example::subscription)
         .title(Example::title)
         .theme(Example::theme)
-        .scale_factor(Example::scale_factor)
         .run()
 }
 
@@ -28,7 +27,6 @@ struct Example {
 struct Window {
     title: String,
     scale_input: String,
-    current_scale: f64,
     theme: Theme,
 }
 
@@ -37,8 +35,6 @@ enum Message {
     OpenWindow,
     WindowOpened(window::Id),
     WindowClosed(window::Id),
-    ScaleInputChanged(window::Id, String),
-    ScaleChanged(window::Id, String),
     TitleChanged(window::Id, String),
     TickCef,
     Created(Arc<Receiver<LifeSpanEvent>>),
@@ -113,23 +109,7 @@ impl Example {
                     Task::none()
                 }
             }
-            Message::ScaleInputChanged(id, scale) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.scale_input = scale;
-                }
 
-                Task::none()
-            }
-            Message::ScaleChanged(id, scale) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.current_scale = scale
-                        .parse::<f64>()
-                        .unwrap_or(window.current_scale)
-                        .clamp(0.5, 5.0);
-                }
-
-                Task::none()
-            }
             Message::TitleChanged(id, title) => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     window.title = title;
@@ -156,13 +136,6 @@ impl Example {
         }
     }
 
-    fn scale_factor(&self, window: window::Id) -> f64 {
-        self.windows
-            .get(&window)
-            .map(|window| window.current_scale)
-            .unwrap_or(1.0)
-    }
-
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch(vec![
             window::close_events().map(Message::WindowClosed),
@@ -176,7 +149,6 @@ impl Window {
         Self {
             title: format!("Window_{}", count),
             scale_input: "1.0".to_string(),
-            current_scale: 1.0,
             theme: Theme::ALL[count % Theme::ALL.len()].clone(),
         }
     }
@@ -185,8 +157,6 @@ impl Window {
         let scale_input = column![
             text("Window scale factor:"),
             text_input("Window Scale", &self.scale_input)
-                .on_input(Message::ScaleInputChanged.with(id))
-                .on_submit(Message::ScaleChanged(id, self.scale_input.to_string()))
         ];
 
         let title_input = column![

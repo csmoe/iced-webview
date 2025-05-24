@@ -1,6 +1,5 @@
 use browser::{AppBuilder, IcyBrowserProcessHandler};
 use cef::ImplCommandLine;
-use cef::library_loader::LibraryLoader;
 use error::Error;
 
 mod backend;
@@ -16,18 +15,23 @@ pub use backend::LifeSpanEvent;
 pub use webview::WebView;
 pub use webview::launch;
 
-pub fn pre_init_cef() -> Result<LibraryLoader> {
-    #[cfg(target_os = "macos")]
-    let loader = {
-        let loader = cef::library_loader::LibraryLoader::new(
-            &std::env::current_exe().expect("cannot get current exe"),
-            std::env::args().any(|f| f.starts_with("--type=")),
-        );
-        if !loader.load() {}
-        loader
-    };
+#[cfg(target_os = "macos")]
+pub fn pre_init_cef() -> Result<cef::library_loader::LibraryLoader> {
+    let loader = cef::library_loader::LibraryLoader::new(
+        &std::env::current_exe().expect("cannot get current exe"),
+        std::env::args().any(|f| f.starts_with("--type=")),
+    );
+    if !loader.load() {
+        std::panic!("cannot load cef library");
+    }
     let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
     Ok(loader)
+}
+
+#[cfg(target_os = "windows")]
+pub fn pre_init_cef() -> Result<()> {
+    let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
+    Ok(())
 }
 
 pub fn init_cef() -> Result<()> {

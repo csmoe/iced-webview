@@ -1,13 +1,12 @@
-use std::time::Duration;
-
 use cef::App;
 use cef::ImplApp;
+use cef::ImplCommandLine;
 use cef::WrapApp;
 use cef::rc::{Rc, RcImpl};
 use cef::{BrowserProcessHandler, ImplBrowserProcessHandler};
 use cef::{WrapBrowserProcessHandler, sys};
+use std::time::Duration;
 
-use iced::wgpu::core::command;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub struct IcyCefApp {}
@@ -68,8 +67,8 @@ impl ImplApp for AppBuilder {
     }
     fn on_before_command_line_processing(
         &self,
-        process_type: Option<&cef::CefString>,
-        command_line: Option<&mut impl cef::ImplCommandLine>,
+        _process_type: Option<&cef::CefString>,
+        command_line: Option<&mut cef::CommandLine>,
     ) {
         let Some(command_line) = command_line else {
             return;
@@ -164,7 +163,7 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         }
     }
 
-    fn on_before_child_process_launch(&self, command_line: Option<&mut impl cef::ImplCommandLine>) {
+    fn on_before_child_process_launch(&self, command_line: Option<&mut cef::CommandLine>) {
         let Some(command_line) = command_line else {
             return;
         };

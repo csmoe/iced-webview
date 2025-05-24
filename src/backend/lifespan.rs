@@ -1,8 +1,10 @@
+use cef::ImplBrowser;
 use cef::ImplLifeSpanHandler;
 use cef::LifeSpanHandler;
 use cef::WrapLifeSpanHandler;
 use cef::rc::*;
 use cef::sys;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 
 use super::BrowserId;
@@ -13,32 +15,25 @@ pub enum LifeSpanEvent {
     Closed { browser_id: BrowserId },
 }
 
-#[derive(Clone)]
-pub struct IcyLifeSpanHandler {
+impl IcyLifeSpanHandler {
+    pub fn new() -> (Self, Receiver<LifeSpanEvent>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        (
+            Self {
+                object: std::ptr::null_mut(),
+                tx,
+            },
+            rx,
+        )
+    }
+}
+
+pub(crate) struct IcyLifeSpanHandler {
+    object: *mut RcImpl<sys::cef_life_span_handler_t, Self>,
     tx: Sender<LifeSpanEvent>,
 }
 
-impl IcyLifeSpanHandler {
-    pub fn new(tx: Sender<LifeSpanEvent>) -> Self {
-        Self { tx }
-    }
-}
-
-pub(crate) struct LifeSpanHandlerBuilder {
-    object: *mut RcImpl<sys::cef_life_span_handler_t, Self>,
-    handler: IcyLifeSpanHandler,
-}
-
-impl LifeSpanHandlerBuilder {
-    pub(crate) fn build(handler: IcyLifeSpanHandler) -> LifeSpanHandler {
-        LifeSpanHandler::new(Self {
-            object: std::ptr::null_mut(),
-            handler,
-        })
-    }
-}
-
-impl Rc for LifeSpanHandlerBuilder {
+impl Rc for IcyLifeSpanHandler {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -47,13 +42,13 @@ impl Rc for LifeSpanHandlerBuilder {
     }
 }
 
-impl WrapLifeSpanHandler for LifeSpanHandlerBuilder {
+impl WrapLifeSpanHandler for IcyLifeSpanHandler {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_life_span_handler_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for LifeSpanHandlerBuilder {
+impl Clone for IcyLifeSpanHandler {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -63,32 +58,32 @@ impl Clone for LifeSpanHandlerBuilder {
 
         Self {
             object,
-            handler: self.handler.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
 
-impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
+impl ImplLifeSpanHandler for IcyLifeSpanHandler {
     fn get_raw(&self) -> *mut sys::_cef_life_span_handler_t {
         self.object.cast()
     }
 
-    fn on_after_created(&self, browser: Option<&mut impl cef::ImplBrowser>) {
+    fn on_after_created(&self, browser: Option<&mut cef::Browser>) {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Created {
+        if let Err(err) = self.tx.try_send(LifeSpanEvent::Created {
             browser_id: browser.identifier().into(),
         }) {
             tracing::warn!(?err, "cannot send life span event");
         }
     }
 
-    fn on_before_close(&self, browser: Option<&mut impl cef::ImplBrowser>) {
+    fn on_before_close(&self, browser: Option<&mut cef::Browser>) {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Closed {
+        if let Err(err) = self.tx.try_send(LifeSpanEvent::Closed {
             browser_id: browser.identifier().into(),
         }) {
             tracing::warn!(?err, "cannot send life span event");

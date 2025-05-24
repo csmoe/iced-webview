@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cef = "135"
-iced = { git = "https://github.com/iced-rs/iced", branch = "master", features = ["tokio", "advanced"] }
+cef = { path = "../cef-rs/cef" }
+iced = { git = "https://github.com/iced-rs/iced", features = ["tokio", "advanced", "lazy"] }
+iced_core = { git = "https://github.com/iced-rs/iced" }
 tracing = "0.1"
 tokio = { version = "1", features = ["sync"] }
 camino = "1"

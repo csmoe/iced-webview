@@ -1,12 +1,13 @@
 use crate::backend::BrowserId;
-use crate::backend::ClientBuilder;
 use crate::backend::IcyClient;
+use crate::backend::IcyRenderState;
+use crate::backend::IcyRequestContextHandler;
 use crate::backend::IcyRequestContextHandler;
 use crate::backend::LifeSpanEvent;
-use crate::backend::RequestContextHandlerBuilder;
 use cef::ImplBrowser;
 use cef::ImplView;
 use iced::Size;
+use iced::advanced::Widget;
 use iced::wgpu::rwh::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 use url::Url;
@@ -35,6 +36,7 @@ pub fn launch(
         parent_window: cef::sys::HWND(parent as _),
         #[cfg(target_os = "macos")]
         parent_view: parent as _,
+        windowless_rendering_enabled: true as _,
         ..Default::default()
     };
     let (client, handlers) = IcyClient::new();
@@ -45,7 +47,7 @@ pub fn launch(
     let mut cef_client = ClientBuilder::build(handlers);
     let mut request_context = cef::request_context_create_context(
         Some(&cef::RequestContextSettings::default()),
-        Some(&mut RequestContextHandlerBuilder::build(
+        Some(&mut IcyRequestContextHandler::build(
             IcyRequestContextHandler {},
         )),
     );
@@ -72,15 +74,16 @@ pub fn launch(
 pub struct TabId(i32);
 
 #[derive(Clone)]
-pub struct WebView {
+pub struct WebView<'a, Message = (), Theme = iced::Theme, Renderer = iced::Renderer> {
     browser_id: BrowserId,
     browser: cef::Browser,
     window: iced::window::Id,
     tab: Option<TabId>,
-    _marker: std::marker::PhantomData<*const ()>,
+    focused_editable_dom_node: Option<iced::Rectangle>,
+    _marker: std::marker::PhantomData<(&'a (), *const (), Message, Theme, Renderer)>,
 }
 
-impl std::hash::Hash for WebView {
+impl std::hash::Hash for WebView<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.browser_id.hash(state);
         self.window.hash(state);
@@ -88,7 +91,7 @@ impl std::hash::Hash for WebView {
     }
 }
 
-impl std::fmt::Debug for WebView {
+impl std::fmt::Debug for WebView<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebView")
             .field("browser_id", &self.browser_id)
@@ -98,21 +101,38 @@ impl std::fmt::Debug for WebView {
     }
 }
 
-impl PartialEq for WebView {
+impl PartialEq for WebView<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.browser_id == other.browser_id && self.window == other.window && self.tab == other.tab
     }
 }
-impl Eq for WebView {}
+impl Eq for WebView<'_> {}
 
-impl WebView {
+impl WebView<'_> {
     pub fn new(browser_id: BrowserId, browser: cef::Browser, window: iced::window::Id) -> Self {
         Self {
             browser,
             browser_id,
             window,
+            focused_editable_dom_node: None,
             tab: None,
             _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn focused_editable_dom_node(mut self, focused_editable_dom_node: iced::Rectangle) -> Self {
+        self.focused_editable_dom_node = Some(focused_editable_dom_node);
+        self
+    }
+
+    fn input_method(&self) -> iced_core::InputMethod {
+        match self.focused_editable_dom_node {
+            Some(node) => iced_core::InputMethod::Enabled {
+                position: node.position(),
+                purpose: iced_core::input_method::Purpose::Normal,
+                preedit: None,
+            },
+            None => iced_core::InputMethod::Disabled,
         }
     }
 
@@ -155,5 +175,62 @@ impl WebView {
 
     fn view(&mut self) -> Option<cef::BrowserView> {
         cef::browser_view_get_for_browser(Some(&mut self.browser))
+    }
+}
+
+struct WebviewState {
+    render: IcyRenderState,
+}
+
+impl<'a, Message, Theme, Renderer> Widget<'a, Message, Theme, Renderer> for WebView<'a> {
+    fn state(&self) -> iced::advanced::widget::tree::State {
+        iced::advanced::widget::tree::State::new(WebviewState {
+            render: IcyRenderState::new(),
+        })
+    }
+
+    fn size(&self) -> Size<iced::Length> {
+        Size::new(iced::Length::Fill, iced::Length::Fill)
+    }
+
+    fn layout(
+        &self,
+        tree: &mut iced::advanced::widget::Tree,
+        renderer: &Renderer,
+        limits: &iced::advanced::layout::Limits,
+    ) -> iced::advanced::layout::Node {
+        todo!()
+    }
+
+    fn draw(
+        &self,
+        tree: &iced::advanced::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::Layout<'_>,
+        cursor: iced::advanced::mouse::Cursor,
+        viewport: &iced::Rectangle,
+    ) {
+    }
+
+    fn update(
+        &mut self,
+        _state: &mut iced_core::widget::Tree,
+        event: &iced::Event,
+        _layout: iced_core::Layout<'_>,
+        _cursor: iced_core::mouse::Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn iced_core::Clipboard,
+        shell: &mut iced_core::Shell<'_, Message>,
+        _viewport: &iced::Rectangle,
+    ) {
+        match event {
+            iced::Event::Window(iced::window::Event::RedrawRequested(_)) => {
+                shell.request_input_method(&self.input_method());
+                shell.request_redraw();
+            }
+            _ => {}
+        }
     }
 }

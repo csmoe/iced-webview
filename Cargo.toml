@@ -13,6 +13,7 @@ camino = "1"
 url = "2"
 atomic-take = "1"
 thiserror = "1"
+tokio-stream = "0"
 
 [dev-dependencies]
 anyhow = "1"

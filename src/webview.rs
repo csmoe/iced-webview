@@ -1,5 +1,7 @@
 use crate::backend::BrowserId;
+use crate::backend::ClientEventSubscriber;
 use crate::backend::IcyClient;
+use crate::backend::IcyClientState;
 use crate::backend::IcyRenderState;
 use crate::backend::IcyRequestContextHandler;
 use crate::backend::LifeSpanEvent;
@@ -8,15 +10,14 @@ use cef::ImplView;
 use iced::Size;
 use iced::advanced::Widget;
 use iced::wgpu::rwh::RawWindowHandle;
-use tokio::sync::mpsc::Receiver;
 use url::Url;
 
 pub fn launch(
     window: RawWindowHandle,
-    bound: (iced::Point, iced::Size),
+    device_scale_factor: f32,
+    rect: iced::Rectangle,
     url: Url,
-) -> crate::Result<Receiver<LifeSpanEvent>> {
-    let (point, size) = bound;
+) -> crate::Result<(IcyClientState, ClientEventSubscriber)> {
     let parent = match window {
         #[cfg(target_os = "windows")]
         RawWindowHandle::Win32(handle) => handle.hwnd.get(),
@@ -25,12 +26,6 @@ pub fn launch(
         _ => return Err(crate::Error::Custom("unsupported window handle".into())),
     };
     let window_info = cef::WindowInfo {
-        bounds: cef::Rect {
-            x: point.x as _,
-            y: point.y as _,
-            width: size.width as _,
-            height: size.height as _,
-        },
         #[cfg(target_os = "windows")]
         parent_window: cef::sys::HWND(parent as _),
         #[cfg(target_os = "macos")]
@@ -38,21 +33,18 @@ pub fn launch(
         windowless_rendering_enabled: true as _,
         ..Default::default()
     };
-    let (client, handlers) = IcyClient::new();
+    let (mut client, state, subscribers) = IcyClient::new(device_scale_factor, rect);
     let browser_settings = cef::BrowserSettings {
         default_encoding: cef::CefString::from("UTF-8"),
         ..Default::default()
     };
-    let mut cef_client = ClientBuilder::build(handlers);
     let mut request_context = cef::request_context_create_context(
         Some(&cef::RequestContextSettings::default()),
-        Some(&mut IcyRequestContextHandler::build(
-            IcyRequestContextHandler {},
-        )),
+        Some(&mut IcyRequestContextHandler::new()),
     );
     let ret = cef::browser_host_create_browser(
         Some(&window_info),
-        Some(&mut cef_client),
+        Some(&mut client),
         Some(&url.as_str().into()),
         Some(&browser_settings),
         Option::<&mut cef::DictionaryValue>::None,
@@ -61,12 +53,8 @@ pub fn launch(
     if ret != 1 {
         return Err(crate::error::Error::CannotCreateBrowser);
     }
-    let IcyClient {
-        load_rx,
-        lifespan_rx,
-    } = client;
 
-    Ok(lifespan_rx)
+    Ok((state, subscribers))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -181,11 +169,11 @@ struct WebviewState {
     render: IcyRenderState,
 }
 
-impl<'a, Message, Theme, Renderer> Widget<'a, Message, Theme, Renderer> for WebView<'a> {
+impl<'a, Message, Theme, Renderer: iced::Renderer> Widget<Message, Theme, Renderer>
+    for WebView<'a>
+{
     fn state(&self) -> iced::advanced::widget::tree::State {
-        iced::advanced::widget::tree::State::new(WebviewState {
-            render: IcyRenderState::new(),
-        })
+        iced::advanced::widget::tree::State::new()
     }
 
     fn size(&self) -> Size<iced::Length> {

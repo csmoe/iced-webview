@@ -10,7 +10,6 @@ pub use lifespan::LifeSpanEvent;
 use load::IcyLoadHandler;
 pub use render::*;
 pub(crate) use request_context::IcyRequestContextHandler;
-pub(crate) use request_context::IcyRequestContextHandler;
 
 use cef::Client;
 use cef::ContextMenuHandler;
@@ -38,8 +37,16 @@ impl BrowserId {
     }
 }
 
+pub struct ClientEventSubscriber {
+    pub lifespan_rx: Receiver<LifeSpanEvent>,
+    pub load_rx: UnboundedReceiver<load::LoadEvent>,
+}
+
 impl IcyClient {
-    pub fn new() -> (Self, IcyClientState) {
+    pub fn new(
+        device_scale_factor: f32,
+        rect: iced::Rectangle,
+    ) -> (Self, IcyClientState, ClientEventSubscriber) {
         let context_menu = context_menu::IcyContextMenuHandler::new();
         let (load, load_rx) = load::IcyLoadHandler::new();
         let (lifespan, lifespan_rx) = lifespan::IcyLifeSpanHandler::new();
@@ -56,15 +63,16 @@ impl IcyClient {
         let icy_client_state = IcyClientState {
             render: render_state,
         };
-        (client, icy_client_state)
+        let subscriber = ClientEventSubscriber {
+            load_rx,
+            lifespan_rx,
+        };
+        (client, icy_client_state, subscriber)
     }
-}
 
-pub struct IcyClientHandlers {
-    pub(crate) context_menu: context_menu::IcyContextMenuHandler,
-    pub(crate) lifespan: lifespan::IcyLifeSpanHandler,
-    pub(crate) load: load::IcyLoadHandler,
-    pub(crate) render: render::IcyRenderHandler,
+    fn into_cef_client(self) -> Client {
+        Client::new(self)
+    }
 }
 
 pub struct IcyClient {
@@ -76,12 +84,7 @@ pub struct IcyClient {
     request_context: IcyRequestContextHandler,
 }
 
-impl IcyClient {
-    fn into_cef_client(self) -> Client {
-        Client::new(self)
-    }
-}
-
+#[derive(Clone)]
 pub struct IcyClientState {
     render: IcyRenderState,
 }
@@ -135,5 +138,9 @@ impl ImplClient for IcyClient {
 
     fn load_handler(&self) -> Option<LoadHandler> {
         Some(LoadHandler::new(self.load.clone()))
+    }
+
+    fn render_handler(&self) -> Option<cef::RenderHandler> {
+        Some(cef::RenderHandler::new(self.render.clone()))
     }
 }

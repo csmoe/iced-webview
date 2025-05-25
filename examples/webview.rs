@@ -3,7 +3,9 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{Center, Element, Fill, Function, Subscription, Task, Theme, Vector};
-use iced_webview::{BrowserId, LifeSpanEvent, init_cef, launch, pre_init_cef};
+use iced_webview::{
+    BrowserId, ClientEventSubscriber, IcyClientState, LifeSpanEvent, init_cef, launch, pre_init_cef,
+};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
@@ -37,7 +39,7 @@ enum Message {
     WindowClosed(window::Id),
     TitleChanged(window::Id, String),
     TickCef,
-    Created(Arc<Receiver<LifeSpanEvent>>),
+    Created(IcyClientState, ClientEventSubscriber),
     Done(BrowserId),
 }
 
@@ -72,10 +74,10 @@ impl Example {
                 };
                 Task::none()
             }
-            Message::Created(mut rx) => Task::perform(
-                async move { Arc::get_mut(&mut rx).unwrap().recv().await },
-                |id| id,
-            )
+            Message::Created(state, subscribers) => Task::batch([
+                tokio_stream::wrappers::ReceiverStream::new(subscribers.lifespan_rx),
+                tokio_stream::wrappers::UnboundedReceiverStream::new(subscribers.load_rx),
+            ])
             .map(|event| match event {
                 Some(LifeSpanEvent::Created { browser_id }) => Message::Done(browser_id),
                 _ => Message::Done(0.into()),
@@ -86,16 +88,19 @@ impl Example {
             }
             Message::WindowOpened(id) => window::get_position(id)
                 .then(move |position| {
+                    window::get_scale_factor(id).map(move |factor| (position, factor))
+                })
+                .then(move |(position, factor)| {
                     window::get_size(id).then(move |size| {
+                        let rect = iced::Rectangle::new(position.unwrap(), size);
                         window::run_with_handle(id, move |handle| {
-                            Arc::new(
-                                launch(
-                                    handle.as_raw(),
-                                    (position.unwrap(), size),
-                                    "https://www.testufo.com".parse().unwrap(),
-                                )
-                                .unwrap(),
+                            launch(
+                                handle.as_raw(),
+                                factor,
+                                rect,
+                                "https://www.testufo.com".parse().unwrap(),
                             )
+                            .unwrap()
                         })
                     })
                 })

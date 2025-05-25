@@ -17,14 +17,6 @@ pub(crate) struct IcyContextMenuHandler {
     object: *mut RcImpl<sys::cef_context_menu_handler_t, Self>,
 }
 
-impl IcyContextMenuHandler {
-    pub(crate) fn build(handler: IcyContextMenuHandler) -> ContextMenuHandler {
-        ContextMenuHandler::new(Self {
-            object: std::ptr::null_mut(),
-        })
-    }
-}
-
 impl Rc for IcyContextMenuHandler {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {

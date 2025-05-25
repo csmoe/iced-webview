@@ -3,8 +3,6 @@ use std::cell::RefCell;
 use cef::rc::*;
 use cef::sys;
 use cef::*;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::UnboundedSender;
 
 pub enum RenderEvent {
     Paint {
@@ -29,6 +27,7 @@ pub struct IcyRenderHandler {
     view_rect: RefCell<iced::Rectangle>,
 }
 
+#[derive(Clone)]
 pub(crate) struct IcyRenderState {
     pub(crate) pixels: RefCell<Vec<u8>>,
     pub(crate) device_scale_factor: RefCell<f32>,

@@ -1,6 +1,5 @@
 use cef::ImplBrowser;
 use cef::ImplLifeSpanHandler;
-use cef::LifeSpanHandler;
 use cef::WrapLifeSpanHandler;
 use cef::rc::*;
 use cef::sys;

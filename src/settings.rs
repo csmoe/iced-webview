@@ -1,5 +1,4 @@
 use camino::Utf8PathBuf;
-use iced::window::settings;
 
 #[derive(Debug, Default)]
 pub struct CefSettings {

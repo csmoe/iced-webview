@@ -1,10 +1,9 @@
-use crate::backend::BrowserId;
+use crate::BrowserId;
 use crate::backend::ClientEventSubscriber;
 use crate::backend::IcyClient;
 use crate::backend::IcyClientState;
 use crate::backend::IcyRenderState;
 use crate::backend::IcyRequestContextHandler;
-use crate::backend::LifeSpanEvent;
 use cef::ImplBrowser;
 use cef::ImplView;
 use iced::Size;
@@ -169,11 +168,11 @@ struct WebviewState {
     render: IcyRenderState,
 }
 
-impl<'a, Message, Theme, Renderer: iced::Renderer> Widget<Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer: iced::advanced::Renderer> Widget<Message, Theme, Renderer>
     for WebView<'a>
 {
     fn state(&self) -> iced::advanced::widget::tree::State {
-        iced::advanced::widget::tree::State::new()
+        todo!()
     }
 
     fn size(&self) -> Size<iced::Length> {

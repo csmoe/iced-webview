@@ -2,7 +2,6 @@ use crate::backend::BrowserId;
 use crate::backend::IcyClient;
 use crate::backend::IcyRenderState;
 use crate::backend::IcyRequestContextHandler;
-use crate::backend::IcyRequestContextHandler;
 use crate::backend::LifeSpanEvent;
 use cef::ImplBrowser;
 use cef::ImplView;

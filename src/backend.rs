@@ -40,21 +40,23 @@ impl BrowserId {
 
 impl IcyClient {
     pub fn new() -> (Self, IcyClientState) {
-        let (load_tx, load_rx) = tokio::sync::mpsc::unbounded_channel();
-        //let (create_tx, create_rx) = oneshot::channel();
-        //let (close_tx, close_rx) = oneshot::channel();
-        let (lifespan_tx, lifespan_rx) = tokio::sync::mpsc::channel(2);
+        let context_menu = context_menu::IcyContextMenuHandler::new();
+        let (load, load_rx) = load::IcyLoadHandler::new();
+        let (lifespan, lifespan_rx) = lifespan::IcyLifeSpanHandler::new();
+        let (render, render_state) = render::IcyRenderHandler::new(device_scale_factor, rect);
+        let request_context = request_context::IcyRequestContextHandler::new();
         let client = IcyClient {
-            load_rx,
-            lifespan_rx,
+            object: std::ptr::null_mut(),
+            load,
+            lifespan,
+            request_context,
+            render,
+            context_menu,
         };
-
-        let handlers = IcyClientHandlers {
-            context_menu: context_menu::IcyContextMenuHandler::new(),
-            load: load::IcyLoadHandler::new(load_tx),
-            lifespan: lifespan::IcyLifeSpanHandler::new(lifespan_tx),
+        let icy_client_state = IcyClientState {
+            render: render_state,
         };
-        (client, handlers)
+        (client, icy_client_state)
     }
 }
 
@@ -75,16 +77,6 @@ pub struct IcyClient {
 }
 
 impl IcyClient {
-    pub fn new(device_scale_factor: f32, rect: iced::Rectangle) -> (Self, IcyClientState) {
-        let (render, render_state) = render::IcyRenderHandler::new(device_scale_factor, rect);
-        let client = IcyClient {
-            object: std::ptr::null_mut(),
-            render,
-            lifespan,
-            load,
-        };
-    }
-
     fn into_cef_client(self) -> Client {
         Client::new(self)
     }

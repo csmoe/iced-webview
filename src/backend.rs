@@ -45,7 +45,7 @@ pub struct ClientEventSubscriber {
 impl IcyClient {
     pub fn new(
         device_scale_factor: f32,
-        rect: iced::Rectangle,
+        rect: cef::Rect,
     ) -> (Self, IcyClientState, ClientEventSubscriber) {
         let context_menu = context_menu::IcyContextMenuHandler::new();
         let (load, load_rx) = load::IcyLoadHandler::new();

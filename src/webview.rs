@@ -14,7 +14,7 @@ use url::Url;
 pub fn launch(
     window: RawWindowHandle,
     device_scale_factor: f32,
-    rect: iced::Rectangle,
+    rect: cef::Rect,
     url: Url,
 ) -> crate::Result<(IcyClientState, ClientEventSubscriber)> {
     let parent = match window {

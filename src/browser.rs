@@ -6,32 +6,26 @@ use cef::rc::{Rc, RcImpl};
 use cef::{BrowserProcessHandler, ImplBrowserProcessHandler};
 use cef::{WrapBrowserProcessHandler, sys};
 use std::time::Duration;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::unbounded_channel;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-pub struct IcyCefApp {}
-
-impl IcyCefApp {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-pub struct AppBuilder {
+pub struct IcyCefApp {
     object: *mut RcImpl<sys::cef_app_t, Self>,
     browser_handler: IcyBrowserProcessHandler,
 }
 
-impl AppBuilder {
-    pub fn build(handler: IcyBrowserProcessHandler) -> App {
-        App::new(Self {
+impl IcyCefApp {
+    pub fn new(browser_handler: IcyBrowserProcessHandler) -> Self {
+        Self {
             object: std::ptr::null_mut(),
-            browser_handler: handler,
-        })
+            browser_handler,
+        }
     }
 }
 
-impl Rc for AppBuilder {
+impl Rc for IcyCefApp {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -40,7 +34,7 @@ impl Rc for AppBuilder {
     }
 }
 
-impl Clone for AppBuilder {
+impl Clone for IcyCefApp {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -55,13 +49,13 @@ impl Clone for AppBuilder {
     }
 }
 
-impl WrapApp for AppBuilder {
+impl WrapApp for IcyCefApp {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_app_t, Self>) {
         self.object = object;
     }
 }
 
-impl ImplApp for AppBuilder {
+impl ImplApp for IcyCefApp {
     fn get_raw(&self) -> *mut sys::_cef_app_t {
         self.object.cast()
     }
@@ -89,8 +83,8 @@ impl ImplApp for AppBuilder {
     }
 }
 
-#[derive(Clone)]
 pub struct IcyBrowserProcessHandler {
+    object: *mut RcImpl<sys::cef_browser_process_handler_t, Self>,
     tx: UnboundedSender<BrowserProcessMessage>,
 }
 
@@ -100,26 +94,19 @@ pub enum BrowserProcessMessage {
 }
 
 impl IcyBrowserProcessHandler {
-    pub fn new(tx: UnboundedSender<BrowserProcessMessage>) -> Self {
-        Self { tx }
+    pub fn new() -> (Self, UnboundedReceiver<BrowserProcessMessage>) {
+        let (tx, rx) = unbounded_channel();
+        (
+            Self {
+                object: std::ptr::null_mut(),
+                tx,
+            },
+            rx,
+        )
     }
 }
 
-pub(crate) struct BrowserProcessHandlerBuilder {
-    object: *mut RcImpl<sys::cef_browser_process_handler_t, Self>,
-    handler: IcyBrowserProcessHandler,
-}
-
-impl BrowserProcessHandlerBuilder {
-    pub(crate) fn build(handler: IcyBrowserProcessHandler) -> BrowserProcessHandler {
-        BrowserProcessHandler::new(Self {
-            object: std::ptr::null_mut(),
-            handler,
-        })
-    }
-}
-
-impl Rc for BrowserProcessHandlerBuilder {
+impl Rc for IcyBrowserProcessHandler {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -128,13 +115,13 @@ impl Rc for BrowserProcessHandlerBuilder {
     }
 }
 
-impl WrapBrowserProcessHandler for BrowserProcessHandlerBuilder {
+impl WrapBrowserProcessHandler for IcyBrowserProcessHandler {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_browser_process_handler_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for BrowserProcessHandlerBuilder {
+impl Clone for IcyBrowserProcessHandler {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -144,19 +131,19 @@ impl Clone for BrowserProcessHandlerBuilder {
 
         Self {
             object,
-            handler: self.handler.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
 
-impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
+impl ImplBrowserProcessHandler for IcyBrowserProcessHandler {
     fn get_raw(&self) -> *mut sys::_cef_browser_process_handler_t {
         self.object.cast()
     }
 
     #[tracing::instrument(skip(self))]
     fn on_context_initialized(&self) {
-        if let Err(err) = self.handler.tx.send(BrowserProcessMessage::Ready) {
+        if let Err(err) = self.tx.send(BrowserProcessMessage::Ready) {
             tracing::warn!(?err, "cannot send browser process message");
         } else {
             tracing::debug!("cef context intialized");
@@ -179,7 +166,6 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
 
     fn on_schedule_message_pump_work(&self, delay_ms: i64) {
         if let Err(err) = self
-            .handler
             .tx
             .send(BrowserProcessMessage::Tick(Duration::from_millis(
                 delay_ms as _,

@@ -24,14 +24,14 @@ pub struct IcyRenderHandler {
     object: *mut RcImpl<sys::cef_render_handler_t, Self>,
     pixels: RefCell<Vec<u8>>,
     device_scale_factor: RefCell<f32>,
-    view_rect: RefCell<iced::Rectangle>,
+    view_rect: RefCell<cef::Rect>,
 }
 
 #[derive(Clone)]
 pub(crate) struct IcyRenderState {
     pub(crate) pixels: RefCell<Vec<u8>>,
     pub(crate) device_scale_factor: RefCell<f32>,
-    pub(crate) view_rect: RefCell<iced::Rectangle>,
+    pub(crate) view_rect: RefCell<cef::Rect>,
 }
 
 impl IcyRenderState {
@@ -39,21 +39,21 @@ impl IcyRenderState {
         *self.device_scale_factor.borrow()
     }
 
-    pub fn view_rect(&self) -> iced::Rectangle {
-        *self.view_rect.borrow()
+    pub fn view_rect(&self) -> cef::Rect {
+        self.view_rect.borrow().clone()
     }
 
     pub fn set_device_scale_factor(&self, device_scale_factor: f32) {
         *self.device_scale_factor.borrow_mut() = device_scale_factor;
     }
 
-    pub fn set_view_rect(&self, view_rect: iced::Rectangle) {
+    pub fn set_view_rect(&self, view_rect: cef::Rect) {
         *self.view_rect.borrow_mut() = view_rect;
     }
 }
 
 impl IcyRenderHandler {
-    pub fn new(device_scale_factor: f32, view_rect: iced::Rectangle) -> (Self, IcyRenderState) {
+    pub fn new(device_scale_factor: f32, view_rect: cef::Rect) -> (Self, IcyRenderState) {
         let device_scale_factor = RefCell::new(device_scale_factor);
         let pixels = RefCell::new(Vec::with_capacity(1024 * 1024));
         let view_rect = RefCell::new(view_rect);

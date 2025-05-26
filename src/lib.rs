@@ -1,6 +1,8 @@
-use browser::{AppBuilder, IcyBrowserProcessHandler};
+use browser::IcyBrowserProcessHandler;
+use browser::{BrowserProcessMessage, IcyCefApp};
 use cef::ImplCommandLine;
 use error::Error;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 mod backend;
 mod browser;
@@ -36,9 +38,9 @@ pub fn pre_init_cef() -> Result<()> {
     Ok(())
 }
 
-pub fn init_cef() -> Result<()> {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = AppBuilder::build(IcyBrowserProcessHandler::new(tx));
+pub fn init_cef() -> Result<Option<UnboundedReceiver<BrowserProcessMessage>>> {
+    let (browser_handler, rx) = IcyBrowserProcessHandler::new();
+    let mut app = IcyCefApp::new(browser_handler);
     let args = cef::args::Args::new();
     let Some(cmd) = args.as_cmd_line() else {
         return Err(Error::Custom("cannot get cmd line".into()));
@@ -60,7 +62,7 @@ pub fn init_cef() -> Result<()> {
             return Err(Error::CannotLaunchProcess);
         }
         // non-browser process does not initialize cef
-        return Ok(());
+        return Ok(None);
     }
 
     let settings = settings::CefSettings::new();
@@ -73,5 +75,5 @@ pub fn init_cef() -> Result<()> {
     if ret != 1 {
         return Err(Error::CannotInitCef);
     }
-    Ok(())
+    Ok(Some(rx))
 }

@@ -2,7 +2,6 @@ use cef::CefString;
 use cef::ImplPreferenceManager;
 use cef::ImplRequestContextHandler;
 use cef::ImplValue;
-use cef::RequestContextHandler;
 use cef::WrapRequestContextHandler;
 use cef::rc::*;
 use cef::sys;
@@ -17,10 +16,6 @@ impl IcyRequestContextHandler {
         let handler = ();
         let object = std::ptr::null_mut();
         Self { object, handler }
-    }
-
-    pub(crate) fn into_cef_handler(self) -> RequestContextHandler {
-        RequestContextHandler::new(self)
     }
 }
 

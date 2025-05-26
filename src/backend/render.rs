@@ -72,10 +72,6 @@ impl IcyRenderHandler {
             },
         )
     }
-
-    pub fn into_cef_handler(self) -> RenderHandler {
-        RenderHandler::new(self)
-    }
 }
 
 impl Rc for IcyRenderHandler {

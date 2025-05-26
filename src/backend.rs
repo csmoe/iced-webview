@@ -11,7 +11,6 @@ use load::IcyLoadHandler;
 pub use render::*;
 pub(crate) use request_context::IcyRequestContextHandler;
 
-use cef::Client;
 use cef::ContextMenuHandler;
 use cef::ImplClient;
 use cef::LifeSpanHandler;
@@ -68,10 +67,6 @@ impl IcyClient {
             lifespan_rx,
         };
         (client, icy_client_state, subscriber)
-    }
-
-    fn into_cef_client(self) -> Client {
-        Client::new(self)
     }
 }
 

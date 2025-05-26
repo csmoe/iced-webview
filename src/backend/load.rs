@@ -4,7 +4,6 @@ use cef::CefStringUtf8;
 use cef::ImplBrowser;
 use cef::ImplFrame;
 use cef::ImplLoadHandler;
-use cef::LoadHandler;
 use cef::WrapLoadHandler;
 use cef::rc::*;
 use cef::sys;
@@ -49,10 +48,6 @@ impl IcyLoadHandler {
             },
             rx,
         )
-    }
-
-    pub fn into_cef_handler(self) -> LoadHandler {
-        LoadHandler::new(self)
     }
 }
 

@@ -1,5 +1,4 @@
 use browser::IcyBrowserProcessHandler;
-use browser::{BrowserProcessMessage, IcyCefApp};
 use cef::ImplCommandLine;
 use error::Error;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -16,8 +15,10 @@ pub use backend::BrowserId;
 pub use backend::ClientEventSubscriber;
 pub use backend::IcyClientState;
 pub use backend::LifeSpanEvent;
-pub use webview::WebView;
-pub use webview::launch;
+pub use browser::BrowserProcessMessage;
+pub use browser::IcyCefApp;
+pub use webview::Webview;
+pub use webview::launch_browser;
 
 #[cfg(target_os = "macos")]
 pub fn pre_init_cef() -> Result<cef::library_loader::LibraryLoader> {
@@ -38,9 +39,9 @@ pub fn pre_init_cef() -> Result<()> {
     Ok(())
 }
 
-pub fn init_cef() -> Result<Option<UnboundedReceiver<BrowserProcessMessage>>> {
+pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessMessage>)>> {
     let (browser_handler, rx) = IcyBrowserProcessHandler::new();
-    let mut app = IcyCefApp::new(browser_handler);
+    let app = IcyCefApp::new(browser_handler);
     let args = cef::args::Args::new();
     let Some(cmd) = args.as_cmd_line() else {
         return Err(Error::Custom("cannot get cmd line".into()));
@@ -50,7 +51,7 @@ pub fn init_cef() -> Result<Option<UnboundedReceiver<BrowserProcessMessage>>> {
     let sandbox = cef::sandbox_info::SandboxInfo::new();
     let ret = cef::execute_process(
         Some(args.as_main_args()),
-        Some(&mut app),
+        Some(&mut cef::App::new(app.clone())),
         sandbox.as_mut_ptr(),
     );
     if is_browser_process {
@@ -69,11 +70,11 @@ pub fn init_cef() -> Result<Option<UnboundedReceiver<BrowserProcessMessage>>> {
     let ret = cef::initialize(
         Some(args.as_main_args()),
         Some(&settings.into_cef_settings()),
-        Some(&mut app),
+        Some(&mut cef::App::new(app.clone())),
         sandbox.as_mut_ptr(),
     );
     if ret != 1 {
         return Err(Error::CannotInitCef);
     }
-    Ok(Some(rx))
+    Ok(Some((app, rx)))
 }

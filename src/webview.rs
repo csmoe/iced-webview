@@ -2,37 +2,36 @@ use crate::BrowserId;
 use crate::backend::ClientEventSubscriber;
 use crate::backend::IcyClient;
 use crate::backend::IcyClientState;
-use crate::backend::IcyRenderState;
 use crate::backend::IcyRequestContextHandler;
-use cef::ImplBrowser;
-use cef::ImplView;
+use iced::Element;
 use iced::Size;
 use iced::advanced::Widget;
-use iced::wgpu::rwh::RawWindowHandle;
 use url::Url;
 
-pub fn launch(
-    window: RawWindowHandle,
+pub fn launch_browser(
+    //window: RawWindowHandle,
     device_scale_factor: f32,
     rect: cef::Rect,
     url: Url,
 ) -> crate::Result<(IcyClientState, ClientEventSubscriber)> {
-    let parent = match window {
-        #[cfg(target_os = "windows")]
-        RawWindowHandle::Win32(handle) => handle.hwnd.get(),
-        #[cfg(target_os = "macos")]
-        RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
-        _ => return Err(crate::Error::Custom("unsupported window handle".into())),
-    };
+    /*
+        let parent = match window {
+            #[cfg(target_os = "windows")]
+            RawWindowHandle::Win32(handle) => handle.hwnd.get(),
+            #[cfg(target_os = "macos")]
+            RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
+            _ => return Err(crate::Error::Custom("unsupported window handle".into())),
+        };
+    */
     let window_info = cef::WindowInfo {
-        #[cfg(target_os = "windows")]
-        parent_window: cef::sys::HWND(parent as _),
-        #[cfg(target_os = "macos")]
-        parent_view: parent as _,
+        //#[cfg(target_os = "windows")]
+        //parent_window: cef::sys::HWND(parent as _),
+        //#[cfg(target_os = "macos")]
+        //parent_view: parent as _,
         windowless_rendering_enabled: true as _,
         ..Default::default()
     };
-    let (mut client, state, subscribers) = IcyClient::new(device_scale_factor, rect);
+    let (client, state, subscribers) = IcyClient::new(device_scale_factor, rect);
     let browser_settings = cef::BrowserSettings {
         default_encoding: cef::CefString::from("UTF-8"),
         ..Default::default()
@@ -43,7 +42,7 @@ pub fn launch(
     );
     let ret = cef::browser_host_create_browser(
         Some(&window_info),
-        Some(&mut client),
+        Some(&mut cef::Client::new(client)),
         Some(&url.as_str().into()),
         Some(&browser_settings),
         Option::<&mut cef::DictionaryValue>::None,
@@ -56,52 +55,17 @@ pub fn launch(
     Ok((state, subscribers))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TabId(i32);
-
-#[derive(Clone)]
-pub struct WebView<'a, Message = (), Theme = iced::Theme, Renderer = iced::Renderer> {
-    browser_id: BrowserId,
-    browser: cef::Browser,
-    window: iced::window::Id,
-    tab: Option<TabId>,
+pub struct Webview<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+    view: Box<dyn Fn(BrowserId) -> Element<'a, Message, Theme, Renderer> + 'a>,
     focused_editable_dom_node: Option<iced::Rectangle>,
     _marker: std::marker::PhantomData<(&'a (), *const (), Message, Theme, Renderer)>,
 }
 
-impl std::hash::Hash for WebView<'_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.browser_id.hash(state);
-        self.window.hash(state);
-        self.tab.hash(state);
-    }
-}
-
-impl std::fmt::Debug for WebView<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WebView")
-            .field("browser_id", &self.browser_id)
-            .field("window", &self.window)
-            .field("tab", &self.tab)
-            .finish()
-    }
-}
-
-impl PartialEq for WebView<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.browser_id == other.browser_id && self.window == other.window && self.tab == other.tab
-    }
-}
-impl Eq for WebView<'_> {}
-
-impl WebView<'_> {
-    pub fn new(browser_id: BrowserId, browser: cef::Browser, window: iced::window::Id) -> Self {
+impl<'a, Message, Theme, Renderer> Webview<'a, Message, Theme, Renderer> {
+    pub fn new(view: impl Fn(BrowserId) -> Element<'a, Message, Theme, Renderer> + 'a) -> Self {
         Self {
-            browser,
-            browser_id,
-            window,
+            view: Box::new(view),
             focused_editable_dom_node: None,
-            tab: None,
             _marker: std::marker::PhantomData,
         }
     }
@@ -121,55 +85,11 @@ impl WebView<'_> {
             None => iced_core::InputMethod::Disabled,
         }
     }
-
-    pub fn window(&self) -> iced::window::Id {
-        self.window
-    }
-
-    pub fn tab(&self) -> Option<TabId> {
-        self.tab
-    }
-
-    pub fn bind_tab(&mut self, tab: TabId) {
-        self.tab = Some(tab);
-    }
-
-    pub fn hidden(&mut self) {
-        if let Some(view) = self.view() {
-            view.set_visible(false as _);
-        }
-    }
-
-    pub fn show(&mut self) {
-        if let Some(view) = self.view() {
-            view.set_visible(true as _);
-        }
-    }
-
-    pub fn resize(&mut self, size: Size) {
-        if let Some(view) = self.view() {
-            view.set_size(Some(&cef::Size {
-                width: size.width as _,
-                height: size.height as _,
-            }));
-        }
-    }
-
-    fn host(&self) -> Option<cef::BrowserHost> {
-        self.browser.host()
-    }
-
-    fn view(&mut self) -> Option<cef::BrowserView> {
-        cef::browser_view_get_for_browser(Some(&mut self.browser))
-    }
 }
 
-struct WebviewState {
-    render: IcyRenderState,
-}
-
+#[allow(unused)]
 impl<'a, Message, Theme, Renderer: iced::advanced::Renderer> Widget<Message, Theme, Renderer>
-    for WebView<'a>
+    for Webview<'a, Message, Theme, Renderer>
 {
     fn state(&self) -> iced::advanced::widget::tree::State {
         todo!()

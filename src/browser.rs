@@ -1,27 +1,43 @@
-use cef::App;
 use cef::ImplApp;
 use cef::ImplCommandLine;
 use cef::WrapApp;
 use cef::rc::{Rc, RcImpl};
 use cef::{BrowserProcessHandler, ImplBrowserProcessHandler};
 use cef::{WrapBrowserProcessHandler, sys};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::unbounded_channel;
 
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::BrowserId;
+use crate::IcyClientState;
+
 pub struct IcyCefApp {
     object: *mut RcImpl<sys::cef_app_t, Self>,
     browser_handler: IcyBrowserProcessHandler,
+    osr_webviews: std::rc::Rc<RefCell<BTreeMap<BrowserId, IcyClientState>>>,
 }
 
 impl IcyCefApp {
     pub fn new(browser_handler: IcyBrowserProcessHandler) -> Self {
         Self {
             object: std::ptr::null_mut(),
+            osr_webviews: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
             browser_handler,
         }
+    }
+
+    pub fn add_osr_webview(&mut self, browser_id: BrowserId, client_state: IcyClientState) {
+        self.osr_webviews
+            .borrow_mut()
+            .insert(browser_id, client_state);
+    }
+
+    pub fn remove_osr_webview(&mut self, browser_id: BrowserId) {
+        self.osr_webviews.borrow_mut().remove(&browser_id);
     }
 }
 
@@ -44,6 +60,7 @@ impl Clone for IcyCefApp {
 
         Self {
             object,
+            osr_webviews: self.osr_webviews.clone(),
             browser_handler: self.browser_handler.clone(),
         }
     }
@@ -59,6 +76,11 @@ impl ImplApp for IcyCefApp {
     fn get_raw(&self) -> *mut sys::_cef_app_t {
         self.object.cast()
     }
+
+    fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
+        Some(BrowserProcessHandler::new(self.browser_handler.clone()))
+    }
+
     fn on_before_command_line_processing(
         &self,
         _process_type: Option<&cef::CefString>,

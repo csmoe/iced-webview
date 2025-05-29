@@ -2,10 +2,11 @@ use cef::ImplApp;
 use cef::ImplCommandLine;
 use cef::WrapApp;
 use cef::rc::{Rc, RcImpl};
-use cef::{BrowserProcessHandler, ImplBrowserProcessHandler};
+use cef::{ ImplBrowserProcessHandler};
 use cef::{WrapBrowserProcessHandler, sys};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ptr::null_mut;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::unbounded_channel;
@@ -15,34 +16,67 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::BrowserId;
 use crate::IcyClientState;
 
+#[derive(Clone)]
 pub struct IcyCefApp {
-    object: *mut RcImpl<sys::cef_app_t, Self>,
-    browser_handler: IcyBrowserProcessHandler,
-    osr_webviews: std::rc::Rc<RefCell<BTreeMap<BrowserId, IcyClientState>>>,
+    osr_browsers: std::rc::Rc<RefCell<BTreeMap<BrowserId, IcyClientState>>>,
 }
 
 impl IcyCefApp {
-    pub fn new(browser_handler: IcyBrowserProcessHandler) -> Self {
+    pub fn new() -> Self {
         Self {
-            object: std::ptr::null_mut(),
-            osr_webviews: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
-            browser_handler,
+            osr_browsers: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
-
-    pub fn add_osr_webview(&mut self, browser_id: BrowserId, client_state: IcyClientState) {
-        self.osr_webviews
+    pub fn add_osr_browser(&mut self, browser_id: BrowserId, client_state: IcyClientState) {
+        self.osr_browsers
             .borrow_mut()
             .insert(browser_id, client_state);
     }
 
-    pub fn remove_osr_webview(&mut self, browser_id: BrowserId) {
-        self.osr_webviews.borrow_mut().remove(&browser_id);
+    pub fn remove_osr_browser(&mut self, browser_id: BrowserId) {
+        self.osr_browsers.borrow_mut().remove(&browser_id);
     }
 }
 
-impl Rc for IcyCefApp {
-    fn as_base(&self) -> &sys::cef_base_ref_counted_t {
+pub(crate) struct AppBuilder {
+    object: *mut RcImpl<cef::sys::_cef_app_t, Self>,
+    app: IcyCefApp,
+    browser_handler: cef::BrowserProcessHandler,
+}
+
+impl AppBuilder {
+    pub(crate) fn build(app: IcyCefApp, browser_handler: IcyBrowserProcessHandler) -> cef::App {
+        cef::App::new(Self {
+            object: std::ptr::null_mut(),
+            app,
+            browser_handler: BrowserProcessHandlerBuilder::build(browser_handler),
+        })
+    }
+}
+
+impl WrapApp for AppBuilder {
+    fn wrap_rc(&mut self, object: *mut RcImpl<cef::sys::_cef_app_t, Self>) {
+        self.object = object;
+    }
+}
+
+impl Clone for AppBuilder {
+    fn clone(&self) -> Self {
+        let object = unsafe {
+            let rc = &mut *self.object;
+            rc.interface.add_ref();
+            self.object
+        };
+        Self {
+            object,
+            app: self.app.clone(),
+            browser_handler: self.browser_handler.clone(),
+        }
+    }
+}
+
+impl Rc for AppBuilder {
+    fn as_base(&self) -> &cef::sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
             std::mem::transmute(&base.cef_object)
@@ -50,64 +84,64 @@ impl Rc for IcyCefApp {
     }
 }
 
-impl Clone for IcyCefApp {
-    fn clone(&self) -> Self {
-        let object = unsafe {
-            let rc_impl = &mut *self.object;
-            rc_impl.interface.add_ref();
-            rc_impl
-        };
-
-        Self {
-            object,
-            osr_webviews: self.osr_webviews.clone(),
-            browser_handler: self.browser_handler.clone(),
-        }
-    }
-}
-
-impl WrapApp for IcyCefApp {
-    fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_app_t, Self>) {
-        self.object = object;
-    }
-}
-
-impl ImplApp for IcyCefApp {
-    fn get_raw(&self) -> *mut sys::_cef_app_t {
-        self.object.cast()
-    }
-
-    fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
-        Some(BrowserProcessHandler::new(self.browser_handler.clone()))
+impl ImplApp for AppBuilder {
+    fn get_raw(&self) -> *mut cef::sys::_cef_app_t {
+        self.object as *mut cef::sys::_cef_app_t
     }
 
     fn on_before_command_line_processing(
         &self,
-        _process_type: Option<&cef::CefString>,
+        process_type: Option<&cef::CefStringUtf16>,
         command_line: Option<&mut cef::CommandLine>,
     ) {
+        if let Some(process_type) = process_type {
+            tracing::info!(
+                process_type = cef::CefStringUtf8::from(process_type).to_string(),
+                "process launching",
+            );
+        }
         let Some(command_line) = command_line else {
+            tracing::error!("no command line");
             return;
         };
+
         command_line.append_switch(Some(&"disable-javascript-open-windows".into()));
         command_line.append_switch(Some(&"disable-web-security".into()));
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
         command_line.append_switch(Some(&"disable-chrome-login-prompt".into()));
         command_line.append_switch(Some(&"allow-running-insecure-content".into()));
-        command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
+        command_line.append_switch(Some(&"no-startup-window".into()));
         command_line.append_switch(Some(&"disable-popup-blocking".into()));
         command_line.append_switch(Some(&"noerrdialogs".into()));
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
         command_line.append_switch(Some(&"use-mock-keychain".into()));
-        command_line.append_switch(Some(&"ignore-certificate-errors".into()));
         command_line.append_switch(Some(&"disable-spell-checking".into()));
-        tracing::debug!("preset command line args done");
+        command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
+        command_line
+            .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
+        tracing::info!("pre-set command line done");
+    }
+
+    fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {
+        Some(self.browser_handler.clone())
     }
 }
 
+#[derive(Clone)]
 pub struct IcyBrowserProcessHandler {
-    object: *mut RcImpl<sys::cef_browser_process_handler_t, Self>,
     tx: UnboundedSender<BrowserProcessMessage>,
+}
+
+impl IcyBrowserProcessHandler {
+    pub fn new() -> (Self, UnboundedReceiver<BrowserProcessMessage>) {
+        let (tx, rx) = unbounded_channel();
+        (Self { tx }, rx)
+    }
+}
+
+pub struct BrowserProcessHandlerBuilder {
+    object: *mut RcImpl<sys::cef_browser_process_handler_t, Self>,
+    handler: IcyBrowserProcessHandler,
 }
 
 pub enum BrowserProcessMessage {
@@ -115,20 +149,16 @@ pub enum BrowserProcessMessage {
     Tick(Duration),
 }
 
-impl IcyBrowserProcessHandler {
-    pub fn new() -> (Self, UnboundedReceiver<BrowserProcessMessage>) {
-        let (tx, rx) = unbounded_channel();
-        (
-            Self {
-                object: std::ptr::null_mut(),
-                tx,
-            },
-            rx,
-        )
+impl BrowserProcessHandlerBuilder {
+    pub fn build(handler: IcyBrowserProcessHandler) -> cef::BrowserProcessHandler {
+        cef::BrowserProcessHandler::new(Self {
+            object: null_mut(),
+            handler,
+        })
     }
 }
 
-impl Rc for IcyBrowserProcessHandler {
+impl Rc for BrowserProcessHandlerBuilder {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -137,13 +167,13 @@ impl Rc for IcyBrowserProcessHandler {
     }
 }
 
-impl WrapBrowserProcessHandler for IcyBrowserProcessHandler {
+impl WrapBrowserProcessHandler for BrowserProcessHandlerBuilder {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_browser_process_handler_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for IcyBrowserProcessHandler {
+impl Clone for BrowserProcessHandlerBuilder {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -153,19 +183,19 @@ impl Clone for IcyBrowserProcessHandler {
 
         Self {
             object,
-            tx: self.tx.clone(),
+            handler: self.handler.clone(),
         }
     }
 }
 
-impl ImplBrowserProcessHandler for IcyBrowserProcessHandler {
+impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
     fn get_raw(&self) -> *mut sys::_cef_browser_process_handler_t {
         self.object.cast()
     }
 
     #[tracing::instrument(skip(self))]
     fn on_context_initialized(&self) {
-        if let Err(err) = self.tx.send(BrowserProcessMessage::Ready) {
+        if let Err(err) = self.handler.tx.send(BrowserProcessMessage::Ready) {
             tracing::warn!(?err, "cannot send browser process message");
         } else {
             tracing::debug!("cef context intialized");
@@ -188,6 +218,7 @@ impl ImplBrowserProcessHandler for IcyBrowserProcessHandler {
 
     fn on_schedule_message_pump_work(&self, delay_ms: i64) {
         if let Err(err) = self
+            .handler
             .tx
             .send(BrowserProcessMessage::Tick(Duration::from_millis(
                 delay_ms as _,

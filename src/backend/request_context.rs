@@ -1,25 +1,38 @@
+use std::ptr::null_mut;
+
 use cef::CefString;
 use cef::ImplPreferenceManager;
 use cef::ImplRequestContextHandler;
 use cef::ImplValue;
+use cef::RequestContextHandler;
 use cef::WrapRequestContextHandler;
 use cef::rc::*;
 use cef::sys;
 
-pub(crate) struct IcyRequestContextHandler {
-    object: *mut RcImpl<sys::cef_request_context_handler_t, Self>,
-    handler: (),
-}
+#[derive(Clone)]
+pub struct IcyRequestContextHandler {}
 
 impl IcyRequestContextHandler {
     pub fn new() -> Self {
-        let handler = ();
-        let object = std::ptr::null_mut();
-        Self { object, handler }
+        Self {}
     }
 }
 
-impl Rc for IcyRequestContextHandler {
+pub(crate) struct RequestContextHandlerBuilder {
+    object: *mut RcImpl<sys::cef_request_context_handler_t, Self>,
+    handler: IcyRequestContextHandler,
+}
+
+impl RequestContextHandlerBuilder {
+    pub fn build(handler: IcyRequestContextHandler) -> RequestContextHandler {
+        RequestContextHandler::new(Self {
+            object: null_mut(),
+            handler,
+        })
+    }
+}
+
+impl Rc for RequestContextHandlerBuilder {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -27,12 +40,12 @@ impl Rc for IcyRequestContextHandler {
         }
     }
 }
-impl WrapRequestContextHandler for IcyRequestContextHandler {
+impl WrapRequestContextHandler for RequestContextHandlerBuilder {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_request_context_handler_t, Self>) {
         self.object = object;
     }
 }
-impl Clone for IcyRequestContextHandler {
+impl Clone for RequestContextHandlerBuilder {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -47,7 +60,7 @@ impl Clone for IcyRequestContextHandler {
     }
 }
 
-impl ImplRequestContextHandler for IcyRequestContextHandler {
+impl ImplRequestContextHandler for RequestContextHandlerBuilder {
     fn get_raw(&self) -> *mut sys::_cef_request_context_handler_t {
         self.object.cast()
     }

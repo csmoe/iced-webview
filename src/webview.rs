@@ -1,11 +1,17 @@
+use std::cell::RefCell;
+
 use crate::BrowserId;
-use crate::backend::ClientEventSubscriber;
+use crate::backend::ClientBuilder;
 use crate::backend::IcyClient;
-use crate::backend::IcyClientState;
+use crate::backend::RequestContextHandlerBuilder;
 use crate::backend::IcyRequestContextHandler;
+use cef::Browser;
 use iced::Element;
 use iced::Size;
 use iced::advanced::Widget;
+use iced::widget::horizontal_space;
+use iced_core::layout;
+use iced_core::mouse::Click;
 use url::Url;
 
 pub fn launch_browser(
@@ -13,16 +19,7 @@ pub fn launch_browser(
     device_scale_factor: f32,
     rect: cef::Rect,
     url: Url,
-) -> crate::Result<(IcyClientState, ClientEventSubscriber)> {
-    /*
-        let parent = match window {
-            #[cfg(target_os = "windows")]
-            RawWindowHandle::Win32(handle) => handle.hwnd.get(),
-            #[cfg(target_os = "macos")]
-            RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
-            _ => return Err(crate::Error::Custom("unsupported window handle".into())),
-        };
-    */
+) -> crate::Result<IcyClient> {
     let window_info = cef::WindowInfo {
         //#[cfg(target_os = "windows")]
         //parent_window: cef::sys::HWND(parent as _),
@@ -31,18 +28,20 @@ pub fn launch_browser(
         windowless_rendering_enabled: true as _,
         ..Default::default()
     };
-    let (client, state, subscribers) = IcyClient::new(device_scale_factor, rect);
+    let (client, handlers) = IcyClient::new(device_scale_factor, rect);
     let browser_settings = cef::BrowserSettings {
         default_encoding: cef::CefString::from("UTF-8"),
         ..Default::default()
     };
     let mut request_context = cef::request_context_create_context(
         Some(&cef::RequestContextSettings::default()),
-        Some(&mut IcyRequestContextHandler::new()),
+        Some(&mut RequestContextHandlerBuilder::build(
+            IcyRequestContextHandler {},
+        )),
     );
     let ret = cef::browser_host_create_browser(
         Some(&window_info),
-        Some(&mut cef::Client::new(client)),
+        Some(&mut ClientBuilder::build(handlers)),
         Some(&url.as_str().into()),
         Some(&browser_settings),
         Option::<&mut cef::DictionaryValue>::None,
@@ -52,19 +51,29 @@ pub fn launch_browser(
         return Err(crate::error::Error::CannotCreateBrowser);
     }
 
-    Ok((state, subscribers))
+    Ok(client)
 }
 
 pub struct Webview<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+    browser_id: BrowserId,
     view: Box<dyn Fn(BrowserId) -> Element<'a, Message, Theme, Renderer> + 'a>,
+    content: RefCell<Element<'a, Message, Theme, Renderer>>,
     focused_editable_dom_node: Option<iced::Rectangle>,
     _marker: std::marker::PhantomData<(&'a (), *const (), Message, Theme, Renderer)>,
 }
 
-impl<'a, Message, Theme, Renderer> Webview<'a, Message, Theme, Renderer> {
-    pub fn new(view: impl Fn(BrowserId) -> Element<'a, Message, Theme, Renderer> + 'a) -> Self {
+impl<'a, Message, Theme, Renderer> Webview<'a, Message, Theme, Renderer>
+where
+    Renderer: iced_core::Renderer,
+{
+    pub fn new(
+        browser_id: BrowserId,
+        view: impl Fn(BrowserId) -> Element<'a, Message, Theme, Renderer> + 'a,
+    ) -> Self {
         Self {
             view: Box::new(view),
+            content: RefCell::new(Element::new(horizontal_space().width(0))),
+            browser_id,
             focused_editable_dom_node: None,
             _marker: std::marker::PhantomData,
         }
@@ -87,12 +96,23 @@ impl<'a, Message, Theme, Renderer> Webview<'a, Message, Theme, Renderer> {
     }
 }
 
+struct State {
+    last_click: Option<Click>,
+    previous_size: Option<iced::Size>,
+    browser: Option<Browser>,
+}
+
 #[allow(unused)]
 impl<'a, Message, Theme, Renderer: iced::advanced::Renderer> Widget<Message, Theme, Renderer>
     for Webview<'a, Message, Theme, Renderer>
 {
     fn state(&self) -> iced::advanced::widget::tree::State {
-        todo!()
+        let browser = cef::browser_host_get_browser_by_identifier(self.browser_id.as_i32());
+        iced::advanced::widget::tree::State::new(State {
+            last_click: None,
+            previous_size: None,
+            browser,
+        })
     }
 
     fn size(&self) -> Size<iced::Length> {
@@ -105,7 +125,7 @@ impl<'a, Message, Theme, Renderer: iced::advanced::Renderer> Widget<Message, The
         renderer: &Renderer,
         limits: &iced::advanced::layout::Limits,
     ) -> iced::advanced::layout::Node {
-        todo!()
+        layout::Node::new(limits.max())
     }
 
     fn draw(
@@ -118,25 +138,26 @@ impl<'a, Message, Theme, Renderer: iced::advanced::Renderer> Widget<Message, The
         cursor: iced::advanced::mouse::Cursor,
         viewport: &iced::Rectangle,
     ) {
+        #[allow(clippy::unwrap_used)]
+        self.content
+            .borrow_mut()
+            .as_widget()
+            .draw(tree, renderer, theme, style, layout, cursor, viewport);
     }
 
     fn update(
         &mut self,
-        _state: &mut iced_core::widget::Tree,
+        state: &mut iced_core::widget::Tree,
         event: &iced::Event,
-        _layout: iced_core::Layout<'_>,
-        _cursor: iced_core::mouse::Cursor,
-        _renderer: &Renderer,
-        _clipboard: &mut dyn iced_core::Clipboard,
+        layout: iced_core::Layout<'_>,
+        cursor: iced_core::mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn iced_core::Clipboard,
         shell: &mut iced_core::Shell<'_, Message>,
-        _viewport: &iced::Rectangle,
+        viewport: &iced::Rectangle,
     ) {
-        match event {
-            iced::Event::Window(iced::window::Event::RedrawRequested(_)) => {
-                shell.request_input_method(&self.input_method());
-                shell.request_redraw();
-            }
-            _ => {}
-        }
+        self.content.borrow_mut().as_widget_mut().update(
+            state, event, layout, cursor, renderer, clipboard, shell, viewport,
+        );
     }
 }

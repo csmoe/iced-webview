@@ -1,8 +1,11 @@
 use std::cell::RefCell;
+use std::ptr::null_mut;
 
 use cef::rc::*;
 use cef::sys;
 use cef::*;
+
+use crate::BrowserId;
 
 pub enum RenderEvent {
     Paint {
@@ -11,27 +14,43 @@ pub enum RenderEvent {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash, Ord)]
-pub struct BrowserId(i32);
+#[derive(Clone)]
+pub struct IcyRenderHandler {
+    pixels: std::rc::Rc<RefCell<Vec<u8>>>,
+    device_scale_factor: std::rc::Rc<RefCell<f32>>,
+    view_rect: std::rc::Rc<RefCell<cef::Rect>>,
+}
 
-impl From<i32> for BrowserId {
-    fn from(id: i32) -> Self {
-        Self(id)
+impl IcyRenderHandler {
+    pub fn new(device_scale_factor: f32, view_rect: cef::Rect) -> (Self, IcyRenderState) {
+        let device_scale_factor = std::rc::Rc::new(RefCell::new(device_scale_factor));
+        let view_rect = std::rc::Rc::new(RefCell::new(view_rect));
+        let state = IcyRenderState {
+            pixels: std::rc::Rc::new(RefCell::new(Vec::with_capacity(1024 * 1024))),
+            device_scale_factor,
+            view_rect,
+        };
+        (
+            Self {
+                pixels: state.pixels.clone(),
+                device_scale_factor: state.device_scale_factor.clone(),
+                view_rect: state.view_rect.clone(),
+            },
+            state,
+        )
     }
 }
 
-pub struct IcyRenderHandler {
+pub struct RenderHandlerBuilder {
     object: *mut RcImpl<sys::cef_render_handler_t, Self>,
-    pixels: RefCell<Vec<u8>>,
-    device_scale_factor: RefCell<f32>,
-    view_rect: RefCell<cef::Rect>,
+    handler: IcyRenderHandler,
 }
 
 #[derive(Clone)]
 pub(crate) struct IcyRenderState {
-    pub(crate) pixels: RefCell<Vec<u8>>,
-    pub(crate) device_scale_factor: RefCell<f32>,
-    pub(crate) view_rect: RefCell<cef::Rect>,
+    pub(crate) pixels: std::rc::Rc<RefCell<Vec<u8>>>,
+    pub(crate) device_scale_factor: std::rc::Rc<RefCell<f32>>,
+    pub(crate) view_rect: std::rc::Rc<RefCell<cef::Rect>>,
 }
 
 impl IcyRenderState {
@@ -52,29 +71,16 @@ impl IcyRenderState {
     }
 }
 
-impl IcyRenderHandler {
-    pub fn new(device_scale_factor: f32, view_rect: cef::Rect) -> (Self, IcyRenderState) {
-        let device_scale_factor = RefCell::new(device_scale_factor);
-        let pixels = RefCell::new(Vec::with_capacity(1024 * 1024));
-        let view_rect = RefCell::new(view_rect);
-        let handler = IcyRenderHandler {
-            object: std::ptr::null_mut(),
-            pixels: pixels.clone(),
-            device_scale_factor: device_scale_factor.clone(),
-            view_rect: view_rect.clone(),
-        };
-        (
+impl RenderHandlerBuilder {
+    pub fn build(handler: IcyRenderHandler) -> RenderHandler {
+        RenderHandler::new(Self {
+            object: null_mut(),
             handler,
-            IcyRenderState {
-                pixels,
-                device_scale_factor,
-                view_rect,
-            },
-        )
+        })
     }
 }
 
-impl Rc for IcyRenderHandler {
+impl Rc for RenderHandlerBuilder {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -82,12 +88,12 @@ impl Rc for IcyRenderHandler {
         }
     }
 }
-impl WrapRenderHandler for IcyRenderHandler {
+impl WrapRenderHandler for RenderHandlerBuilder {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_render_handler_t, Self>) {
         self.object = object;
     }
 }
-impl Clone for IcyRenderHandler {
+impl Clone for RenderHandlerBuilder {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -97,20 +103,20 @@ impl Clone for IcyRenderHandler {
 
         Self {
             object,
-            pixels: self.pixels.clone(),
-            device_scale_factor: self.device_scale_factor.clone(),
-            view_rect: self.view_rect.clone(),
+            handler: self.handler.clone(),
         }
     }
 }
 
-impl ImplRenderHandler for IcyRenderHandler {
+impl ImplRenderHandler for RenderHandlerBuilder {
     fn get_raw(&self) -> *mut sys::_cef_render_handler_t {
         self.object.cast()
     }
 
     fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
-        if let Some(_rect) = rect {}
+        if let Some(rect) = rect {
+            *rect = self.handler.view_rect.borrow().clone();
+        }
     }
 
     fn screen_info(
@@ -118,7 +124,10 @@ impl ImplRenderHandler for IcyRenderHandler {
         _browser: Option<&mut Browser>,
         screen_info: Option<&mut ScreenInfo>,
     ) -> ::std::os::raw::c_int {
-        if let Some(_screen_info) = screen_info {}
+        if let Some(screen_info) = screen_info {
+            screen_info.device_scale_factor = *self.handler.device_scale_factor.borrow();
+            return true as _;
+        }
         return false as _;
     }
 
@@ -152,7 +161,7 @@ impl ImplRenderHandler for IcyRenderHandler {
         }
         let pixels =
             unsafe { std::slice::from_raw_parts(buffer, width as usize * height as usize * 4) };
-        self.pixels.borrow_mut().clear();
-        self.pixels.borrow_mut().extend_from_slice(pixels);
+        self.handler.pixels.borrow_mut().clear();
+        self.handler.pixels.borrow_mut().extend_from_slice(pixels);
     }
 }

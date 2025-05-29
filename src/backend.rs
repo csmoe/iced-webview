@@ -1,18 +1,29 @@
 mod context_menu;
+mod keyboard;
 mod lifespan;
 mod load;
 mod render;
 mod request_context;
 
+use std::ptr::null_mut;
+
+use cef::RenderHandler;
+use context_menu::ContextMenuHandlerBuilder;
 use context_menu::IcyContextMenuHandler;
+use keyboard::IcyKeyboardHandler;
+use keyboard::KeyboardHandlerBuilder;
 use lifespan::IcyLifeSpanHandler;
 pub use lifespan::LifeSpanEvent;
+use lifespan::LifeSpanHandlerBuilder;
 use load::IcyLoadHandler;
+use load::LoadHandlerBuilder;
 pub use render::*;
 pub(crate) use request_context::IcyRequestContextHandler;
+pub(crate) use request_context::RequestContextHandlerBuilder;
 
 use cef::ContextMenuHandler;
 use cef::ImplClient;
+use cef::KeyboardHandler;
 use cef::LifeSpanHandler;
 use cef::LoadHandler;
 use cef::WrapClient;
@@ -20,6 +31,8 @@ use cef::rc::*;
 use cef::sys;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash, Ord)]
 pub struct BrowserId(i32);
@@ -41,42 +54,95 @@ pub struct ClientEventSubscriber {
     pub load_rx: UnboundedReceiver<load::LoadEvent>,
 }
 
+pub struct IcyClient {
+    pub state: IcyClientState,
+    pub events: ClientEventSubscriber,
+}
+
+pub enum CefIpcMessage {
+    EditableNodeFocused {
+        x: f32,
+        y: f32,
+        width: i32,
+        height: i32,
+    },
+    CaretPositionChanged {
+        offset: f32,
+    },
+}
+
+#[derive(Clone)]
+pub struct ClientHandlers {
+    load_handler: IcyLoadHandler,
+    lifespan_handler: IcyLifeSpanHandler,
+    render_handler: IcyRenderHandler,
+    context_menu_handler: IcyContextMenuHandler,
+    keyboard_handler: IcyKeyboardHandler,
+    process_message_tx: UnboundedSender<CefIpcMessage>,
+}
+
 impl IcyClient {
-    pub fn new(
-        device_scale_factor: f32,
-        rect: cef::Rect,
-    ) -> (Self, IcyClientState, ClientEventSubscriber) {
-        let context_menu = context_menu::IcyContextMenuHandler::new();
-        let (load, load_rx) = load::IcyLoadHandler::new();
-        let (lifespan, lifespan_rx) = lifespan::IcyLifeSpanHandler::new();
-        let (render, render_state) = render::IcyRenderHandler::new(device_scale_factor, rect);
-        let request_context = request_context::IcyRequestContextHandler::new();
-        let client = IcyClient {
-            object: std::ptr::null_mut(),
-            load,
-            lifespan,
-            request_context,
-            render,
-            context_menu,
-        };
-        let icy_client_state = IcyClientState {
+    pub fn new(device_scale_factor: f32, view_rect: cef::Rect) -> (Self, ClientHandlers) {
+        let (load_handler, load_rx) = IcyLoadHandler::new();
+        let (render_handler, render_state) = IcyRenderHandler::new(device_scale_factor, view_rect);
+        let (lifespan_handler, lifespan_rx) = IcyLifeSpanHandler::new();
+        let context_menu_handler = IcyContextMenuHandler::new();
+        let keyboard_handler = IcyKeyboardHandler::new();
+        let (process_message_tx, _) = unbounded_channel();
+        let state = IcyClientState {
             render: render_state,
         };
-        let subscriber = ClientEventSubscriber {
-            load_rx,
+        let events = ClientEventSubscriber {
             lifespan_rx,
+            load_rx,
         };
-        (client, icy_client_state, subscriber)
+        let handlers = ClientHandlers {
+            load_handler,
+            lifespan_handler,
+            render_handler,
+            context_menu_handler,
+            keyboard_handler,
+            process_message_tx,
+        };
+        (Self { state, events }, handlers)
     }
 }
 
-pub struct IcyClient {
+pub struct ClientBuilder {
     object: *mut cef::rc::RcImpl<cef::sys::cef_client_t, Self>,
-    load: IcyLoadHandler,
-    lifespan: IcyLifeSpanHandler,
-    context_menu: IcyContextMenuHandler,
-    render: IcyRenderHandler,
-    request_context: IcyRequestContextHandler,
+    load_handler: LoadHandler,
+    lifespan_handler: LifeSpanHandler,
+    render_handler: RenderHandler,
+    context_menu_handler: ContextMenuHandler,
+    keyboard_handler: KeyboardHandler,
+    process_message_tx: UnboundedSender<CefIpcMessage>,
+}
+
+impl ClientBuilder {
+    pub fn build(client: ClientHandlers) -> cef::Client {
+        let ClientHandlers {
+            load_handler,
+            lifespan_handler,
+            render_handler,
+            keyboard_handler,
+            process_message_tx,
+            context_menu_handler,
+        } = client;
+        let load_handler = LoadHandlerBuilder::build(load_handler);
+        let lifespan_handler = LifeSpanHandlerBuilder::build(lifespan_handler);
+        let render_handler = RenderHandlerBuilder::build(render_handler);
+        let context_menu_handler = ContextMenuHandlerBuilder::build(context_menu_handler);
+        let keyboard_handler = KeyboardHandlerBuilder::build(keyboard_handler);
+        cef::Client::new(Self {
+            object: null_mut(),
+            lifespan_handler,
+            render_handler,
+            context_menu_handler,
+            process_message_tx,
+            keyboard_handler,
+            load_handler,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -84,7 +150,7 @@ pub struct IcyClientState {
     render: IcyRenderState,
 }
 
-impl Rc for IcyClient {
+impl Rc for ClientBuilder {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -93,13 +159,13 @@ impl Rc for IcyClient {
     }
 }
 
-impl WrapClient for IcyClient {
+impl WrapClient for ClientBuilder {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_client_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for IcyClient {
+impl Clone for ClientBuilder {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -109,33 +175,38 @@ impl Clone for IcyClient {
 
         Self {
             object,
-            load: self.load.clone(),
-            lifespan: self.lifespan.clone(),
-            context_menu: self.context_menu.clone(),
-            render: self.render.clone(),
-            request_context: self.request_context.clone(),
+            load_handler: self.load_handler.clone(),
+            render_handler: self.render_handler.clone(),
+            lifespan_handler: self.lifespan_handler.clone(),
+            context_menu_handler: self.context_menu_handler.clone(),
+            keyboard_handler: self.keyboard_handler.clone(),
+            process_message_tx: self.process_message_tx.clone(),
         }
     }
 }
 
-impl ImplClient for IcyClient {
+impl ImplClient for ClientBuilder {
     fn get_raw(&self) -> *mut sys::_cef_client_t {
         self.object.cast()
     }
 
-    fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
-        Some(ContextMenuHandler::new(self.context_menu.clone()))
+    fn load_handler(&self) -> Option<cef::LoadHandler> {
+        Some(self.load_handler.clone())
     }
 
-    fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-        Some(LifeSpanHandler::new(self.lifespan.clone()))
-    }
-
-    fn load_handler(&self) -> Option<LoadHandler> {
-        Some(LoadHandler::new(self.load.clone()))
+    fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
+        Some(self.lifespan_handler.clone())
     }
 
     fn render_handler(&self) -> Option<cef::RenderHandler> {
-        Some(cef::RenderHandler::new(self.render.clone()))
+        Some(self.render_handler.clone())
+    }
+
+    fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+        Some(self.context_menu_handler.clone())
+    }
+
+    fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+        Some(self.keyboard_handler.clone())
     }
 }

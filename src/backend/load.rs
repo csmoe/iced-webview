@@ -1,9 +1,12 @@
+use std::ptr::null_mut;
+
 use super::BrowserId;
 use cef::CefString;
 use cef::CefStringUtf8;
 use cef::ImplBrowser;
 use cef::ImplFrame;
 use cef::ImplLoadHandler;
+use cef::LoadHandler;
 use cef::WrapLoadHandler;
 use cef::rc::*;
 use cef::sys;
@@ -38,25 +41,33 @@ pub enum LoadEvent {
     },
 }
 
-impl IcyLoadHandler {
-    pub fn new() -> (Self, UnboundedReceiver<LoadEvent>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        (
-            Self {
-                object: std::ptr::null_mut(),
-                tx,
-            },
-            rx,
-        )
-    }
-}
-
-pub(crate) struct IcyLoadHandler {
-    object: *mut RcImpl<sys::cef_load_handler_t, Self>,
+#[derive(Clone)]
+pub struct IcyLoadHandler {
     tx: UnboundedSender<LoadEvent>,
 }
 
-impl Rc for IcyLoadHandler {
+impl IcyLoadHandler {
+    pub fn new() -> (Self, UnboundedReceiver<LoadEvent>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (Self { tx }, rx)
+    }
+}
+
+impl LoadHandlerBuilder {
+    pub fn build(handler: IcyLoadHandler) -> LoadHandler {
+        LoadHandler::new(Self {
+            object: null_mut(),
+            handler,
+        })
+    }
+}
+
+pub(crate) struct LoadHandlerBuilder {
+    object: *mut RcImpl<sys::cef_load_handler_t, Self>,
+    handler: IcyLoadHandler,
+}
+
+impl Rc for LoadHandlerBuilder {
     fn as_base(&self) -> &sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -65,13 +76,13 @@ impl Rc for IcyLoadHandler {
     }
 }
 
-impl WrapLoadHandler for IcyLoadHandler {
+impl WrapLoadHandler for LoadHandlerBuilder {
     fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_load_handler_t, Self>) {
         self.object = object;
     }
 }
 
-impl Clone for IcyLoadHandler {
+impl Clone for LoadHandlerBuilder {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -81,12 +92,12 @@ impl Clone for IcyLoadHandler {
 
         Self {
             object,
-            tx: self.tx.clone(),
+            handler: self.handler.clone(),
         }
     }
 }
 
-impl ImplLoadHandler for IcyLoadHandler {
+impl ImplLoadHandler for LoadHandlerBuilder {
     fn get_raw(&self) -> *mut sys::_cef_load_handler_t {
         self.object.cast()
     }
@@ -101,7 +112,7 @@ impl ImplLoadHandler for IcyLoadHandler {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.tx.send(LoadEvent::Changed {
+        if let Err(err) = self.handler.tx.send(LoadEvent::Changed {
             browser_id: Some(browser.identifier().into()),
             is_loading: is_loading != 0,
             can_go_back: can_go_back != 0,
@@ -120,7 +131,7 @@ impl ImplLoadHandler for IcyLoadHandler {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.tx.send(LoadEvent::Start {
+        if let Err(err) = self.handler.tx.send(LoadEvent::Start {
             browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
                 CefStringUtf8::from(&CefString::from(&f.identifier()))
@@ -142,7 +153,7 @@ impl ImplLoadHandler for IcyLoadHandler {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.tx.send(LoadEvent::End {
+        if let Err(err) = self.handler.tx.send(LoadEvent::End {
             browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
                 CefStringUtf8::from(&CefString::from(&f.identifier()))
@@ -166,7 +177,7 @@ impl ImplLoadHandler for IcyLoadHandler {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.tx.send(LoadEvent::Error {
+        if let Err(err) = self.handler.tx.send(LoadEvent::Error {
             browser_id: Some(browser.identifier().into()),
             frame_id: frame.and_then(|f| {
                 CefStringUtf8::from(&CefString::from(&f.identifier()))

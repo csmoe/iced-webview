@@ -2,16 +2,15 @@ use iced::widget::{container, horizontal_space};
 use iced::window;
 use iced::{Element, Subscription, Task, Theme};
 use iced_webview::{
-    BrowserId, BrowserProcessMessage, ClientEventSubscriber, IcyCefApp, IcyClientState,
-    LifeSpanEvent, init_cef, launch_browser, pre_init_cef,
+    init_cef, launch_browser, pre_init_cef, BrowserId, BrowserProcessMessage, ClientEventSubscriber, IcyCefApp, IcyClient, IcyClientState, LifeSpanEvent
 };
 use std::cell::RefCell;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 
 use std::collections::BTreeMap;
 
@@ -62,9 +61,10 @@ enum Message {
     WindowOpened(window::Id),
     WindowClosed(window::Id),
     TitleChanged(window::Id, String),
+    LaunchBrowser(window::Id,  f32, cef::Rect),
     TickCef(Duration),
-    Created(IcyClientState, std::sync::Arc<ClientEventSubscriber>),
-    Done(BrowserId),
+    Created(BrowserId, Arc<Mutex<Option<IcyClientState>>>),
+    Closed(BrowserId),
 }
 
 impl std::fmt::Debug for Message {
@@ -79,7 +79,7 @@ impl std::fmt::Debug for Message {
             Message::TickCef(duration) => {
                 f.debug_tuple("Message::TickCef").field(duration).finish()
             }
-            Message::Created(state, subscriber) => write!(f, "Message::Created"),
+            Message::Created(..) => write!(f, "Message::Created"),
             Message::Done(browser_id) => f.debug_tuple("Message::Done").field(browser_id).finish(),
         }
     }
@@ -128,15 +128,13 @@ impl Example {
                 };
                 Task::none()
             }
-            Message::Created(state, subscribers) => Task::stream(
-                tokio_stream::wrappers::ReceiverStream::new(
-                    Arc::into_inner(subscribers).unwrap().lifespan_rx,
-                )
-                .map(|event| match event {
-                    LifeSpanEvent::Created { browser_id } => Message::Done(browser_id),
-                    _ => Message::Done(0.into()),
-                }),
-            ),
+            Message::Created(browser_id, state) => {
+                if let Some(state) = state.lock().unwrap().take() {
+                    self.icy_cef_app.add_osr_browser(browser_id, state);
+                }
+
+                Task::none()
+            }
 
             Message::Done(id) => {
                 println!("webview done {id:?}");
@@ -156,10 +154,22 @@ impl Example {
                         width: size.width.floor() as _,
                         height: size.height.floor() as _,
                     };
-                    launch_browser(factor, rect, "https://www.testufo.com".parse().unwrap())
-                        .unwrap()
-                })
-                .map(|(state, subscribers)| Message::Created(state, Arc::new(subscribers))),
+                    Message::LaunchBrowser(id, factor, rect)
+                }),
+            Message::LaunchBrowser(id, factor, rect) => {
+                    let (client, handlers) = IcyClient::new(factor, rect);
+                    let ClientEventSubscriber {
+                        lifespan_rx,
+                        load_rx,
+                    } = client.events;
+                    launch_browser(handlers, "https://www.testufo.com".parse().unwrap());
+                    Task::stream(ReceiverStream::new(lifespan_rx)).map(move |lifespan| match lifespan {
+                        LifeSpanEvent::Closed { browser_id } => Message::Closed(browser_id),
+                        LifeSpanEvent::Created { browser_id } => {
+                            Message::Created(browser_id, Arc::new(Mutex::new(Some(client.state))))
+                        }
+                    })
+                },
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
 

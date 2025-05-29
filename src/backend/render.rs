@@ -7,13 +7,6 @@ use cef::*;
 
 use crate::BrowserId;
 
-pub enum RenderEvent {
-    Paint {
-        browser_id: BrowserId,
-        pixels: Vec<u8>,
-    },
-}
-
 #[derive(Clone)]
 pub struct IcyRenderHandler {
     pixels: std::rc::Rc<RefCell<Vec<u8>>>,

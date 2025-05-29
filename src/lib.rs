@@ -13,6 +13,7 @@ mod webview;
 use crate::error::Result;
 
 pub use backend::ClientEventSubscriber;
+pub use backend::IcyClient;
 pub use backend::IcyClientState;
 pub use backend::LifeSpanEvent;
 pub use browser::BrowserProcessMessage;

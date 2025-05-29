@@ -1,10 +1,9 @@
 use std::cell::RefCell;
 
+use crate::backend::ClientHandlers;
 use crate::BrowserId;
 use crate::backend::ClientBuilder;
-use crate::backend::IcyClient;
 use crate::backend::RequestContextHandlerBuilder;
-use crate::backend::IcyRequestContextHandler;
 use cef::Browser;
 use iced::Element;
 use iced::Size;
@@ -16,19 +15,13 @@ use url::Url;
 
 pub fn launch_browser(
     //window: RawWindowHandle,
-    device_scale_factor: f32,
-    rect: cef::Rect,
+    handlers: ClientHandlers,
     url: Url,
-) -> crate::Result<IcyClient> {
+) -> crate::Result<()> {
     let window_info = cef::WindowInfo {
-        //#[cfg(target_os = "windows")]
-        //parent_window: cef::sys::HWND(parent as _),
-        //#[cfg(target_os = "macos")]
-        //parent_view: parent as _,
         windowless_rendering_enabled: true as _,
         ..Default::default()
     };
-    let (client, handlers) = IcyClient::new(device_scale_factor, rect);
     let browser_settings = cef::BrowserSettings {
         default_encoding: cef::CefString::from("UTF-8"),
         ..Default::default()
@@ -36,7 +29,7 @@ pub fn launch_browser(
     let mut request_context = cef::request_context_create_context(
         Some(&cef::RequestContextSettings::default()),
         Some(&mut RequestContextHandlerBuilder::build(
-            IcyRequestContextHandler {},
+            crate::backend::IcyRequestContextHandler::new(),
         )),
     );
     let ret = cef::browser_host_create_browser(
@@ -51,7 +44,7 @@ pub fn launch_browser(
         return Err(crate::error::Error::CannotCreateBrowser);
     }
 
-    Ok(client)
+    Ok(())
 }
 
 pub struct Webview<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {

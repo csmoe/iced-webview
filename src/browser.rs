@@ -1,11 +1,12 @@
 use cef::ImplApp;
+use cef::ImplBrowserProcessHandler;
 use cef::ImplCommandLine;
 use cef::WrapApp;
 use cef::rc::{Rc, RcImpl};
-use cef::{ ImplBrowserProcessHandler};
 use cef::{WrapBrowserProcessHandler, sys};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::ptr::null_mut;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -19,12 +20,14 @@ use crate::IcyClientState;
 #[derive(Clone)]
 pub struct IcyCefApp {
     osr_browsers: std::rc::Rc<RefCell<BTreeMap<BrowserId, IcyClientState>>>,
+    state_queue: std::rc::Rc<RefCell<BTreeMap<i32, IcyClientState>>>,
 }
 
 impl IcyCefApp {
     pub fn new() -> Self {
         Self {
             osr_browsers: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
+            state_queue: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
     pub fn add_osr_browser(&mut self, browser_id: BrowserId, client_state: IcyClientState) {
@@ -36,6 +39,7 @@ impl IcyCefApp {
     pub fn remove_osr_browser(&mut self, browser_id: BrowserId) {
         self.osr_browsers.borrow_mut().remove(&browser_id);
     }
+
 }
 
 pub(crate) struct AppBuilder {

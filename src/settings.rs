@@ -35,6 +35,7 @@ impl CefSettings {
             persist_session_cookies: true as _,
             cache_path: cache_path.as_str().into(),
             user_agent: user_agent.as_str().into(),
+            windowless_rendering_enabled: true as _,
             accept_language_list: locale.unwrap_or("en-US".into()).as_str().into(),
             log_file: log_file_path.as_str().into(),
             ..Default::default()

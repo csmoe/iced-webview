@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 
-use crate::backend::ClientHandlers;
 use crate::BrowserId;
 use crate::backend::ClientBuilder;
+use crate::backend::ClientHandlers;
 use crate::backend::RequestContextHandlerBuilder;
 use cef::Browser;
 use iced::Element;

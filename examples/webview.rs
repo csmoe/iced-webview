@@ -2,11 +2,11 @@ use iced::widget::{container, horizontal_space};
 use iced::window;
 use iced::{Element, Subscription, Task, Theme};
 use iced_webview::{
-    init_cef, launch_browser, pre_init_cef, BrowserId, BrowserProcessMessage, ClientEventSubscriber, IcyCefApp, IcyClient, IcyClientState, LifeSpanEvent
+    BrowserId, BrowserProcessMessage, ClientEventSubscriber, IcyCefApp, IcyClient, Id,
+    LifeSpanEvent, init_cef, launch_browser, pre_init_cef,
 };
 use std::cell::RefCell;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::StreamExt;
@@ -61,9 +61,9 @@ enum Message {
     WindowOpened(window::Id),
     WindowClosed(window::Id),
     TitleChanged(window::Id, String),
-    LaunchBrowser(window::Id,  f32, cef::Rect),
+    LaunchBrowser(window::Id, f32, cef::Rect, Id),
     TickCef(Duration),
-    Created(BrowserId, Arc<Mutex<Option<IcyClientState>>>),
+    Created(BrowserId, Id),
     Closed(BrowserId),
 }
 
@@ -80,7 +80,8 @@ impl std::fmt::Debug for Message {
                 f.debug_tuple("Message::TickCef").field(duration).finish()
             }
             Message::Created(..) => write!(f, "Message::Created"),
-            Message::Done(browser_id) => f.debug_tuple("Message::Done").field(browser_id).finish(),
+            Message::Closed(..) => write!(f, "Message::Closed"),
+            Message::LaunchBrowser(..) => write!(f, "Message::LaunchBrowser"),
         }
     }
 }
@@ -128,18 +129,16 @@ impl Example {
                 };
                 Task::none()
             }
-            Message::Created(browser_id, state) => {
-                if let Some(state) = state.lock().unwrap().take() {
-                    self.icy_cef_app.add_osr_browser(browser_id, state);
-                }
+            Message::Created(browser_id, launch_id) => {
+                self.icy_cef_app.add_osr_browser(browser_id, launch_id);
 
                 Task::none()
             }
-
-            Message::Done(id) => {
-                println!("webview done {id:?}");
+            Message::Closed(browser_id) => {
+                self.icy_cef_app.remove_osr_browser(browser_id);
                 Task::none()
             }
+
             Message::WindowOpened(id) => window::get_position(id)
                 .and_then(move |position| {
                     window::get_scale_factor(id).map(move |factor| (position, factor))
@@ -154,22 +153,28 @@ impl Example {
                         width: size.width.floor() as _,
                         height: size.height.floor() as _,
                     };
-                    Message::LaunchBrowser(id, factor, rect)
+                    Message::LaunchBrowser(id, factor, rect, Id::unique())
                 }),
-            Message::LaunchBrowser(id, factor, rect) => {
-                    let (client, handlers) = IcyClient::new(factor, rect);
-                    let ClientEventSubscriber {
-                        lifespan_rx,
-                        load_rx,
-                    } = client.events;
-                    launch_browser(handlers, "https://www.testufo.com".parse().unwrap());
-                    Task::stream(ReceiverStream::new(lifespan_rx)).map(move |lifespan| match lifespan {
-                        LifeSpanEvent::Closed { browser_id } => Message::Closed(browser_id),
-                        LifeSpanEvent::Created { browser_id } => {
-                            Message::Created(browser_id, Arc::new(Mutex::new(Some(client.state))))
-                        }
-                    })
-                },
+            Message::LaunchBrowser(id, factor, rect, launch_id) => {
+                let (client, handlers) = IcyClient::new(factor, rect);
+                let ClientEventSubscriber {
+                    lifespan_rx,
+                    load_rx,
+                } = client.events;
+                self.icy_cef_app.add_state(launch_id, client.state);
+                if launch_browser(handlers, "https://www.testufo.com".parse().unwrap())
+                    .inspect_err(|err| tracing::error!(?err, "cannot launch browser"))
+                    .is_err()
+                {
+                    return Task::none();
+                }
+                Task::stream(ReceiverStream::new(lifespan_rx)).map(move |lifespan| match lifespan {
+                    LifeSpanEvent::Closed { browser_id } => Message::Closed(browser_id),
+                    LifeSpanEvent::Created { browser_id } => {
+                        Message::Created(browser_id, launch_id)
+                    }
+                })
+            }
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
 

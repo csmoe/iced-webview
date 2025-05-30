@@ -18,6 +18,7 @@ pub use backend::IcyClientState;
 pub use backend::LifeSpanEvent;
 pub use browser::BrowserProcessMessage;
 pub use browser::IcyCefApp;
+pub use browser::Id;
 pub use webview::Webview;
 pub use webview::launch_browser;
 

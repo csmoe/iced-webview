@@ -21,6 +21,7 @@ pub use render::*;
 pub(crate) use request_context::IcyRequestContextHandler;
 pub(crate) use request_context::RequestContextHandlerBuilder;
 
+use crate::BrowserId;
 use cef::ContextMenuHandler;
 use cef::ImplClient;
 use cef::KeyboardHandler;
@@ -31,23 +32,8 @@ use cef::rc::*;
 use cef::sys;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::mpsc::UnboundedSender;
-
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash, Ord)]
-pub struct BrowserId(i32);
-
-impl From<i32> for BrowserId {
-    fn from(id: i32) -> Self {
-        Self(id)
-    }
-}
-
-impl BrowserId {
-    pub fn as_i32(&self) -> i32 {
-        self.0
-    }
-}
+use tokio::sync::mpsc::unbounded_channel;
 
 pub struct ClientEventSubscriber {
     pub lifespan_rx: Receiver<LifeSpanEvent>,

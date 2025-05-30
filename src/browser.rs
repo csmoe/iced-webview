@@ -6,8 +6,8 @@ use cef::rc::{Rc, RcImpl};
 use cef::{WrapBrowserProcessHandler, sys};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::collections::VecDeque;
 use std::ptr::null_mut;
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::unbounded_channel;
@@ -17,29 +17,52 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::BrowserId;
 use crate::IcyClientState;
 
+static NEXT_UNIQUE_BROWSER_ID: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Id(usize);
+impl Id {
+    pub fn unique() -> Self {
+        let id = NEXT_UNIQUE_BROWSER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(id)
+    }
+}
+
 #[derive(Clone)]
 pub struct IcyCefApp {
-    osr_browsers: std::rc::Rc<RefCell<BTreeMap<BrowserId, IcyClientState>>>,
-    state_queue: std::rc::Rc<RefCell<BTreeMap<i32, IcyClientState>>>,
+    osr_browsers: std::rc::Rc<RefCell<BTreeMap<BrowserId, Id>>>,
+    states: BTreeMap<Id, IcyClientState>,
 }
 
 impl IcyCefApp {
     pub fn new() -> Self {
         Self {
             osr_browsers: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
-            state_queue: std::rc::Rc::new(RefCell::new(BTreeMap::new())),
+            states: BTreeMap::new(),
         }
     }
-    pub fn add_osr_browser(&mut self, browser_id: BrowserId, client_state: IcyClientState) {
-        self.osr_browsers
-            .borrow_mut()
-            .insert(browser_id, client_state);
+    pub fn add_osr_browser(&mut self, browser_id: BrowserId, id: Id) {
+        self.osr_browsers.borrow_mut().insert(browser_id, id);
     }
 
     pub fn remove_osr_browser(&mut self, browser_id: BrowserId) {
         self.osr_browsers.borrow_mut().remove(&browser_id);
     }
 
+    pub fn add_state(&mut self, id: Id, state: IcyClientState) {
+        self.states.insert(id, state);
+    }
+
+    pub fn remove_state(&mut self, id: Id) {
+        self.states.remove(&id);
+    }
+
+    pub fn get(&self, browser_id: BrowserId) -> Option<&IcyClientState> {
+        if let Some(launch_id) = self.osr_browsers.borrow().get(&browser_id) {
+            return self.states.get(launch_id);
+        }
+        return None;
+    }
 }
 
 pub(crate) struct AppBuilder {

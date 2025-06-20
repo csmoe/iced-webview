@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cef = { path = "../cef-rs/cef" }
-iced = { git = "https://github.com/iced-rs/iced", features = ["tokio", "advanced", "lazy"] }
+cef = { git = "https://github.com/tauri-apps/cef-rs", rev = "0ba50de5caae9d76c45cbaf5050c661a6b113b64" }
+iced = { git = "https://github.com/iced-rs/iced", features = ["tokio", "advanced", "lazy", "image"] }
 iced_core = { git = "https://github.com/iced-rs/iced" }
 tracing = "0.1"
 tokio = { version = "1", features = ["sync"] }
@@ -14,6 +14,10 @@ url = "2"
 atomic-take = "1"
 thiserror = "1"
 tokio-stream = "0"
+anyhow = "1"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+either = "1"
 
 [dev-dependencies]
 anyhow = "1"

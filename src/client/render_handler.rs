@@ -1,35 +1,41 @@
-use std::cell::RefCell;
-use std::ptr::null_mut;
-
-use cef::rc::*;
-use cef::sys;
-use cef::*;
-
 use crate::BrowserId;
+use cef;
+use cef::{rc::*, sys, *};
+use std::{
+    cell::{Ref, RefCell},
+    fmt::Debug,
+    ptr::null_mut,
+};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 #[derive(Clone)]
 pub struct IcyRenderHandler {
-    pixels: std::rc::Rc<RefCell<Vec<u8>>>,
-    device_scale_factor: std::rc::Rc<RefCell<f32>>,
-    view_rect: std::rc::Rc<RefCell<cef::Rect>>,
+    state: IcyRenderState,
+    tx: UnboundedSender<BrowserId>,
 }
 
 impl IcyRenderHandler {
-    pub fn new(device_scale_factor: f32, view_rect: cef::Rect) -> (Self, IcyRenderState) {
+    pub fn new(
+        device_scale_factor: f32,
+        view_rect: cef::Rect,
+    ) -> (Self, IcyRenderState, UnboundedReceiver<BrowserId>) {
         let device_scale_factor = std::rc::Rc::new(RefCell::new(device_scale_factor));
         let view_rect = std::rc::Rc::new(RefCell::new(view_rect));
+        let size = std::rc::Rc::new(RefCell::new((0, 0)));
+        let (tx, rx) = unbounded_channel();
         let state = IcyRenderState {
             pixels: std::rc::Rc::new(RefCell::new(Vec::with_capacity(1024 * 1024))),
             device_scale_factor,
             view_rect,
+            size,
         };
         (
             Self {
-                pixels: state.pixels.clone(),
-                device_scale_factor: state.device_scale_factor.clone(),
-                view_rect: state.view_rect.clone(),
+                state: state.clone(),
+                tx,
             },
             state,
+            rx,
         )
     }
 }
@@ -40,10 +46,20 @@ pub struct RenderHandlerBuilder {
 }
 
 #[derive(Clone)]
-pub(crate) struct IcyRenderState {
+pub struct IcyRenderState {
     pub(crate) pixels: std::rc::Rc<RefCell<Vec<u8>>>,
     pub(crate) device_scale_factor: std::rc::Rc<RefCell<f32>>,
     pub(crate) view_rect: std::rc::Rc<RefCell<cef::Rect>>,
+    pub(crate) size: std::rc::Rc<RefCell<(i32, i32)>>,
+}
+
+impl Debug for IcyRenderState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderState")
+            .field("pixels", &self.pixels.borrow().len())
+            .field("scale_factor", &self.device_scale_factor())
+            .finish()
+    }
 }
 
 impl IcyRenderState {
@@ -61,6 +77,13 @@ impl IcyRenderState {
 
     pub fn set_view_rect(&self, view_rect: cef::Rect) {
         *self.view_rect.borrow_mut() = view_rect;
+    }
+
+    pub fn pixels(&self) -> Ref<'_, Vec<u8>> {
+        self.pixels.borrow()
+    }
+    pub fn size(&self) -> (i32, i32) {
+        self.size.borrow().clone()
     }
 }
 
@@ -108,7 +131,10 @@ impl ImplRenderHandler for RenderHandlerBuilder {
 
     fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
         if let Some(rect) = rect {
-            *rect = self.handler.view_rect.borrow().clone();
+            let view_rect = self.handler.state.view_rect();
+            if view_rect.height > 0 && view_rect.width > 0 {
+                *rect = view_rect;
+            }
         }
     }
 
@@ -118,7 +144,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         screen_info: Option<&mut ScreenInfo>,
     ) -> ::std::os::raw::c_int {
         if let Some(screen_info) = screen_info {
-            screen_info.device_scale_factor = *self.handler.device_scale_factor.borrow();
+            screen_info.device_scale_factor = *self.handler.state.device_scale_factor.borrow();
             return true as _;
         }
         return false as _;
@@ -139,8 +165,8 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         &self,
         browser: Option<&mut Browser>,
         type_: PaintElementType,
-        _dirty_rects_count: usize,
-        _dirty_rects: Option<&Rect>,
+        dirty_rects_count: usize,
+        dirty_rects: Option<&Rect>,
         buffer: *const u8,
         width: ::std::os::raw::c_int,
         height: ::std::os::raw::c_int,
@@ -148,13 +174,56 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
-        let _browser_id: BrowserId = browser.identifier().into();
+        let browser_id: BrowserId = browser.identifier().into();
         if type_ != cef::sys::cef_paint_element_type_t::PET_VIEW.into() {
             return;
         }
-        let pixels =
+
+        let mut size = self.handler.state.size.borrow_mut();
+        let size_changed = (width as usize, height as usize) != (size.0 as _, size.1 as _);
+        *size = (width as _, height as _);
+
+        let source_buffer =
             unsafe { std::slice::from_raw_parts(buffer, width as usize * height as usize * 4) };
-        self.handler.pixels.borrow_mut().clear();
-        self.handler.pixels.borrow_mut().extend_from_slice(pixels);
+
+        let mut pixels = self.handler.state.pixels.borrow_mut();
+        if pixels.is_empty() || size_changed {
+            pixels.clear();
+            pixels.extend_from_slice(source_buffer);
+
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk.swap(0, 2);
+            }
+        } else {
+            if dirty_rects_count > 0 {
+                if let Some(rects) = dirty_rects {
+                    let dirty_rects = unsafe {
+                        std::slice::from_raw_parts(std::ptr::addr_of!(rects), dirty_rects_count)
+                    };
+
+                    for rect in dirty_rects {
+                        let x = rect.x.max(0).min(width - 1) as usize;
+                        let y = rect.y.max(0).min(height - 1) as usize;
+                        let rect_width = rect.width.min(width - rect.x) as usize;
+                        let rect_height = rect.height.min(height - rect.y) as usize;
+
+                        for row in 0..rect_height {
+                            let y_offset = (y + row) * size.0 as usize;
+                            for col in 0..rect_width {
+                                let idx = (y_offset + x + col) * 4;
+                                pixels[idx] = source_buffer[idx + 2];
+                                pixels[idx + 1] = source_buffer[idx + 1];
+                                pixels[idx + 2] = source_buffer[idx];
+                                pixels[idx + 3] = source_buffer[idx + 3];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        pixels.shrink_to_fit();
+
+        _ = self.handler.tx.send(browser_id);
     }
 }

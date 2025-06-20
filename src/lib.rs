@@ -1,32 +1,39 @@
-use browser::AppBuilder;
-use browser::IcyBrowserProcessHandler;
-use cef::ImplCommandLine;
-use error::Error;
-use tokio::sync::mpsc::UnboundedReceiver;
-
-mod backend;
 mod browser;
+mod client;
 mod error;
+mod instance;
+mod request;
 mod settings;
+mod task;
+#[allow(unused)]
+mod v8;
 mod webview;
 
-use crate::error::Result;
+use std::time::Duration;
 
-pub use backend::ClientEventSubscriber;
-pub use backend::IcyClient;
-pub use backend::IcyClientState;
-pub use backend::LifeSpanEvent;
-pub use browser::BrowserProcessMessage;
+use crate::browser::AppBuilder;
+use crate::browser::IcyBrowserProcessHandler;
+use crate::error::Result;
 pub use browser::IcyCefApp;
-pub use browser::Id;
+use cef::ImplCommandLine;
+use error::CefError;
+use tokio::sync::mpsc::UnboundedReceiver;
+
+pub use client::ClientEventSubscriber;
+pub use client::IcyClient;
+pub use client::IcyClientState;
+pub use client::LifeSpanEvent;
+pub use instance::CefAction;
+pub use instance::CefComponent;
+pub use instance::CefMessage;
 pub use webview::Webview;
-pub use webview::launch_browser;
+pub use webview::close_webview;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash, Ord)]
 pub struct BrowserId(i32);
 
 impl BrowserId {
-    pub fn as_i32(&self) -> i32 {
+    pub fn inner(&self) -> i32 {
         self.0
     }
 }
@@ -56,10 +63,15 @@ pub fn pre_init_cef() -> Result<()> {
     Ok(())
 }
 
+pub enum BrowserProcessMessage {
+    Ready,
+    Tick(Duration),
+}
+
 pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessMessage>)>> {
     let args = cef::args::Args::new();
     let Some(cmd) = args.as_cmd_line() else {
-        return Err(Error::Custom("cannot get cmd line".into()));
+        return Err(CefError::Custom("cannot get cmd line".into()));
     };
     let (browser_handler, rx) = IcyBrowserProcessHandler::new();
     let app = IcyCefApp::new();
@@ -74,11 +86,11 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
     );
     if is_browser_process {
         if ret != -1 {
-            return Err(Error::CannotLaunchProcess);
+            return Err(CefError::ProcessLaunchFailed);
         }
     } else {
         if ret < 0 {
-            return Err(Error::CannotLaunchProcess);
+            return Err(CefError::ProcessLaunchFailed);
         }
         // non-browser process does not initialize cef
         return Ok(None);
@@ -92,7 +104,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
         sandbox.as_mut_ptr(),
     );
     if ret != 1 {
-        return Err(Error::CannotInitCef);
+        return Err(CefError::CannotInit(ret));
     }
     Ok(Some((app, rx)))
 }

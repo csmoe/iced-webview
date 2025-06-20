@@ -1,14 +1,28 @@
-use cef::rc::*;
-use cef::*;
-use std::ffi::*;
-use std::ptr::null_mut;
+use cef;
+use cef::{rc::*, *};
+use std::{cell::RefCell, ffi::*, ptr::null_mut};
 
 #[derive(Clone)]
-pub struct IcyKeyboardHandler {}
+pub struct IcyKeyboardHandler {
+    state: IcyKeyboardState,
+}
+
+#[derive(Clone, Debug)]
+pub struct IcyKeyboardState {
+    focus_on_editable_field: std::rc::Rc<RefCell<bool>>,
+}
 
 impl IcyKeyboardHandler {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new() -> (Self, IcyKeyboardState) {
+        let state = IcyKeyboardState {
+            focus_on_editable_field: std::rc::Rc::new(RefCell::new(false)),
+        };
+        (
+            Self {
+                state: state.clone(),
+            },
+            state,
+        )
     }
 }
 
@@ -79,6 +93,11 @@ impl ImplKeyboardHandler for KeyboardHandlerBuilder {
         let Some(event) = event else {
             return false as _;
         };
+        *self
+            .keyboard_handler
+            .state
+            .focus_on_editable_field
+            .borrow_mut() = event.focus_on_editable_field == 1;
         #[cfg(target_os = "macos")]
         let ctrl =
             event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN as u32) != 0;
@@ -129,19 +148,19 @@ impl ImplKeyboardHandler for KeyboardHandlerBuilder {
         if keydown {
             if ctrl {
                 match event.windows_key_code {
-                    97 => frame.select_all(), /* A */
-                    122 => frame.undo(),      /* Z */
-                    120 => frame.cut(),       /* X */
-                    99 => frame.copy(),       /* C */
-                    118 => frame.paste(),     /* V */
-                    121 => frame.redo(),      /* Y */
+                    97 => frame.select_all(), // A
+                    122 => frame.undo(),      // Z
+                    120 => frame.cut(),       // X
+                    99 => frame.copy(),       // C
+                    118 => frame.paste(),     // V
+                    121 => frame.redo(),      // Y
 
                     _ => return false as _,
                 }
             } else {
                 match event.windows_key_code {
                     123 => {
-                        /* F12 */
+                        // F12
                         if let Some(host) = browser.host() {
                             if host.has_dev_tools() == 1 {
                                 host.close_dev_tools();

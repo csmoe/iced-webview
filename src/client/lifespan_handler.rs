@@ -1,15 +1,12 @@
+use cef;
+use cef::{ImplBrowser, ImplLifeSpanHandler, LifeSpanHandler, WrapLifeSpanHandler, rc::*, sys};
 use std::ptr::null_mut;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-use cef::ImplBrowser;
-use cef::ImplLifeSpanHandler;
-use cef::LifeSpanHandler;
-use cef::WrapLifeSpanHandler;
-use cef::rc::*;
-use cef::sys;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::Sender;
-
-use super::BrowserId;
+use crate::{
+    BrowserId,
+    instance::{LaunchId, new_webview, remove_webview},
+};
 
 #[derive(Clone, Debug)]
 pub enum LifeSpanEvent {
@@ -20,12 +17,13 @@ pub enum LifeSpanEvent {
 #[derive(Clone)]
 pub struct IcyLifeSpanHandler {
     tx: Sender<LifeSpanEvent>,
+    launch_id: LaunchId,
 }
 
 impl IcyLifeSpanHandler {
-    pub fn new() -> (Self, Receiver<LifeSpanEvent>) {
+    pub fn new(launch_id: LaunchId) -> (Self, Receiver<LifeSpanEvent>) {
         let (tx, rx) = tokio::sync::mpsc::channel(2);
-        (Self { tx }, rx)
+        (Self { tx, launch_id }, rx)
     }
 }
 
@@ -82,10 +80,18 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
-        if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Created {
-            browser_id: browser.identifier().into(),
-        }) {
-            tracing::warn!(?err, "cannot send life span event");
+        if self
+            .handler
+            .tx
+            .try_send(LifeSpanEvent::Created {
+                browser_id: browser.identifier().into(),
+            })
+            .inspect_err(|err| {
+                tracing::warn!(?err, "cannot send life span event");
+            })
+            .is_ok()
+        {
+            new_webview(self.handler.launch_id, browser.identifier().into());
         }
     }
 
@@ -93,10 +99,31 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
         let Some(browser) = browser else {
             return;
         };
+
+        remove_webview(browser.identifier().into());
         if let Err(err) = self.handler.tx.try_send(LifeSpanEvent::Closed {
             browser_id: browser.identifier().into(),
         }) {
             tracing::warn!(?err, "cannot send life span event");
         }
+    }
+
+    fn on_before_popup(
+        &self,
+        _browser: Option<&mut cef::Browser>,
+        _frame: Option<&mut cef::Frame>,
+        _popup_id: ::std::os::raw::c_int,
+        _target_url: Option<&cef::CefString>,
+        _target_frame_name: Option<&cef::CefString>,
+        _target_disposition: cef::WindowOpenDisposition,
+        _user_gesture: ::std::os::raw::c_int,
+        _popup_features: Option<&cef::PopupFeatures>,
+        _window_info: Option<&mut cef::WindowInfo>,
+        _client: Option<&mut Option<impl cef::ImplClient>>,
+        _settings: Option<&mut cef::BrowserSettings>,
+        _extra_info: Option<&mut Option<cef::DictionaryValue>>,
+        _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
+    ) -> ::std::os::raw::c_int {
+        return true as _;
     }
 }

@@ -1,22 +1,14 @@
+use cef;
+use cef::{
+    CefString, ImplRequestContextHandler, ImplValue, RequestContextHandler,
+    WrapRequestContextHandler,
+    rc::{Rc, RcImpl},
+    sys, *,
+};
 use std::ptr::null_mut;
-
-use cef::CefString;
-use cef::ImplPreferenceManager;
-use cef::ImplRequestContextHandler;
-use cef::ImplValue;
-use cef::RequestContextHandler;
-use cef::WrapRequestContextHandler;
-use cef::rc::*;
-use cef::sys;
 
 #[derive(Clone)]
 pub struct IcyRequestContextHandler {}
-
-impl IcyRequestContextHandler {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
 
 pub(crate) struct RequestContextHandlerBuilder {
     object: *mut RcImpl<sys::cef_request_context_handler_t, Self>,
@@ -24,11 +16,17 @@ pub(crate) struct RequestContextHandlerBuilder {
 }
 
 impl RequestContextHandlerBuilder {
-    pub fn build(handler: IcyRequestContextHandler) -> RequestContextHandler {
+    pub(crate) fn build(handler: IcyRequestContextHandler) -> RequestContextHandler {
         RequestContextHandler::new(Self {
             object: null_mut(),
             handler,
         })
+    }
+}
+
+impl WrapRequestContextHandler for RequestContextHandlerBuilder {
+    fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_request_context_handler_t, Self>) {
+        self.object = object;
     }
 }
 
@@ -40,11 +38,7 @@ impl Rc for RequestContextHandlerBuilder {
         }
     }
 }
-impl WrapRequestContextHandler for RequestContextHandlerBuilder {
-    fn wrap_rc(&mut self, object: *mut RcImpl<sys::_cef_request_context_handler_t, Self>) {
-        self.object = object;
-    }
-}
+
 impl Clone for RequestContextHandlerBuilder {
     fn clone(&self) -> Self {
         let object = unsafe {
@@ -66,35 +60,41 @@ impl ImplRequestContextHandler for RequestContextHandlerBuilder {
     }
 
     fn on_request_context_initialized(&self, request_context: Option<&mut cef::RequestContext>) {
-        let Some(request_context) = request_context else {
-            return;
-        };
+        tracing::info!("request context initialized");
+
         const KEY1: &str = "credentials_enable_service";
         const KEY2: &str = "session.restore_on_startup";
+        let Some(ctxt) = request_context else {
+            return;
+        };
+
         if let Some(mut value) = cef::value_create() {
-            let err = unsafe { cef::sys::cef_string_userfree_utf16_alloc() };
-            let mut error = CefString::from(err);
+            // FIXME: better string alloc/free
+            let error = unsafe { cef::sys::cef_string_userfree_utf16_alloc() };
+            let mut error = CefString::from(error);
             value.set_bool(false as _);
-            if request_context.set_preference(
+            if ctxt.set_preference(
                 Some(&CefString::from(KEY1)),
                 Some(&mut value),
                 Some(&mut error),
             ) != 1
             {
-                tracing::error!("Failed to set preference: {}", error.to_string());
+                tracing::error!(key = KEY1, "cannot set preference");
             }
         }
+
         if let Some(mut value) = cef::value_create() {
-            let err = unsafe { cef::sys::cef_string_userfree_utf16_alloc() };
-            let mut error = CefString::from(err);
             value.set_int(5);
-            if request_context.set_preference(
+            let error = unsafe { cef::sys::cef_string_userfree_utf16_alloc() };
+            let mut error = CefString::from(error);
+
+            if ctxt.set_preference(
                 Some(&CefString::from(KEY2)),
                 Some(&mut value),
                 Some(&mut error),
             ) != 1
             {
-                tracing::error!("Failed to set preference: {}", error.to_string());
+                tracing::error!(key = KEY2, "cannot set preference");
             }
         }
     }

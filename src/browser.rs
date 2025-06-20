@@ -1,37 +1,17 @@
-use cef::ImplApp;
-use cef::ImplBrowserProcessHandler;
-use cef::ImplCommandLine;
-use cef::WrapApp;
-use cef::rc::{Rc, RcImpl};
-use cef::{WrapBrowserProcessHandler, sys};
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::ptr::null_mut;
-use std::sync::atomic::AtomicUsize;
-use std::time::Duration;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::unbounded_channel;
+use cef::{
+    self, BrowserProcessHandler, ImplBrowserProcessHandler, WrapBrowserProcessHandler,
+    rc::{Rc, RcImpl},
+    sys, *,
+};
+use std::{cell::RefCell, collections::BTreeMap, time::Duration};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use tokio::sync::mpsc::UnboundedSender;
+use crate::{BrowserId, BrowserProcessMessage, IcyClientState, instance::LaunchId};
 
-use crate::BrowserId;
-use crate::IcyClientState;
-
-static NEXT_UNIQUE_BROWSER_ID: AtomicUsize = AtomicUsize::new(0);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Id(usize);
-impl Id {
-    pub fn unique() -> Self {
-        let id = NEXT_UNIQUE_BROWSER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Self(id)
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IcyCefApp {
-    osr_browsers: std::rc::Rc<RefCell<BTreeMap<BrowserId, Id>>>,
-    states: BTreeMap<Id, IcyClientState>,
+    osr_browsers: std::rc::Rc<RefCell<BTreeMap<BrowserId, LaunchId>>>,
+    states: BTreeMap<LaunchId, IcyClientState>,
 }
 
 impl IcyCefApp {
@@ -41,7 +21,7 @@ impl IcyCefApp {
             states: BTreeMap::new(),
         }
     }
-    pub fn add_osr_browser(&mut self, browser_id: BrowserId, id: Id) {
+    pub fn add_osr_browser(&mut self, browser_id: BrowserId, id: LaunchId) {
         self.osr_browsers.borrow_mut().insert(browser_id, id);
     }
 
@@ -49,17 +29,24 @@ impl IcyCefApp {
         self.osr_browsers.borrow_mut().remove(&browser_id);
     }
 
-    pub fn add_state(&mut self, id: Id, state: IcyClientState) {
+    pub fn add_state(&mut self, id: LaunchId, state: IcyClientState) {
         self.states.insert(id, state);
     }
 
-    pub fn remove_state(&mut self, id: Id) {
+    pub fn remove_state(&mut self, id: LaunchId) {
         self.states.remove(&id);
     }
 
     pub fn get(&self, browser_id: BrowserId) -> Option<&IcyClientState> {
         if let Some(launch_id) = self.osr_browsers.borrow().get(&browser_id) {
             return self.states.get(launch_id);
+        }
+        return None;
+    }
+
+    pub fn get_mut(&mut self, browser_id: BrowserId) -> Option<&mut IcyClientState> {
+        if let Some(launch_id) = self.osr_browsers.borrow().get(&browser_id) {
+            return self.states.get_mut(launch_id);
         }
         return None;
     }
@@ -166,20 +153,15 @@ impl IcyBrowserProcessHandler {
     }
 }
 
-pub struct BrowserProcessHandlerBuilder {
+pub(crate) struct BrowserProcessHandlerBuilder {
     object: *mut RcImpl<sys::cef_browser_process_handler_t, Self>,
     handler: IcyBrowserProcessHandler,
 }
 
-pub enum BrowserProcessMessage {
-    Ready,
-    Tick(Duration),
-}
-
 impl BrowserProcessHandlerBuilder {
-    pub fn build(handler: IcyBrowserProcessHandler) -> cef::BrowserProcessHandler {
-        cef::BrowserProcessHandler::new(Self {
-            object: null_mut(),
+    pub(crate) fn build(handler: IcyBrowserProcessHandler) -> BrowserProcessHandler {
+        BrowserProcessHandler::new(Self {
+            object: std::ptr::null_mut(),
             handler,
         })
     }
@@ -222,14 +204,11 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
 
     #[tracing::instrument(skip(self))]
     fn on_context_initialized(&self) {
-        if let Err(err) = self.handler.tx.send(BrowserProcessMessage::Ready) {
-            tracing::warn!(?err, "cannot send browser process message");
-        } else {
-            tracing::debug!("cef context intialized");
-        }
+        tracing::info!("cef context intialized");
+        _ = self.handler.tx.send(BrowserProcessMessage::Ready);
     }
 
-    fn on_before_child_process_launch(&self, command_line: Option<&mut cef::CommandLine>) {
+    fn on_before_child_process_launch(&self, command_line: Option<&mut CommandLine>) {
         let Some(command_line) = command_line else {
             return;
         };
@@ -241,9 +220,14 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         command_line.append_switch(Some(&"allow-running-insecure-content".into()));
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
         command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
+        command_line.append_switch(Some(&"ignore-certificate-errors".into()));
+        command_line.append_switch(Some(&"ignore-ssl-errors".into()));
     }
 
     fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+        if delay_ms <= 0 {
+            return;
+        }
         if let Err(err) = self
             .handler
             .tx

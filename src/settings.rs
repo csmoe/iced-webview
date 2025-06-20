@@ -8,6 +8,7 @@ pub struct CefSettings {
     log_file_path: Utf8PathBuf,
 }
 
+#[allow(unused)]
 impl CefSettings {
     pub fn new() -> Self {
         Self::default()
@@ -36,6 +37,7 @@ impl CefSettings {
             cache_path: cache_path.as_str().into(),
             user_agent: user_agent.as_str().into(),
             windowless_rendering_enabled: true as _,
+            external_message_pump: true as _,
             accept_language_list: locale.unwrap_or("en-US".into()).as_str().into(),
             log_file: log_file_path.as_str().into(),
             ..Default::default()

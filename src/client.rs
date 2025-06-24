@@ -231,7 +231,7 @@ impl ImplClient for ClientBuilder {
         };
         let event_name =
             cef::CefStringUtf8::from(&cef::CefString::from(&message.name())).to_string();
-        if "render.caret_offset_changed" == &event_name {
+        if "renderer.caret_offset_changed" == &event_name {
             if let Some(bound) = message.argument_list().map(|args| args.string(0)) {
                 #[derive(serde::Deserialize)]
                 struct Offset {
@@ -254,7 +254,7 @@ impl ImplClient for ClientBuilder {
                 return true as _;
             }
         }
-        if "render.editable_node_focused" == &event_name {
+        if "renderer.editable_node_focused" == &event_name {
             if let Some(bound) = message.argument_list().map(|args| args.string(0)) {
                 #[derive(serde::Deserialize)]
                 struct Node {

@@ -32,6 +32,8 @@ pub enum CefMessage {
     Create(window::Id, url::Url, iced::Point, iced::Size, f32),
     Created(BrowserId),
     Closed(BrowserId),
+    UpdateCaretOffset(BrowserId, f32),
+    EditableNodeFocused(BrowserId, iced::Rectangle),
     PumpLoop(Duration),
     UpdateView(BrowserId),
 }
@@ -52,6 +54,16 @@ impl std::fmt::Debug for CefMessage {
             Self::Closed(browser_id) => f.debug_tuple("Closed").field(browser_id).finish(),
             Self::PumpLoop(delay) => f.debug_tuple("PumpLoop").field(delay).finish(),
             Self::UpdateView(browser_id) => f.debug_tuple("UpdateView").field(browser_id).finish(),
+            Self::UpdateCaretOffset(browser_id, offset) => f
+                .debug_tuple("UpdateCaretOffset")
+                .field(browser_id)
+                .field(offset)
+                .finish(),
+            Self::EditableNodeFocused(browser_id, rect) => f
+                .debug_tuple("EditableNodeFocused")
+                .field(browser_id)
+                .field(rect)
+                .finish(),
         }
     }
 }
@@ -243,31 +255,26 @@ impl CefComponent {
                     LoadEvent::Error { .. } => CefMessage::PumpLoop(Duration::from_secs(1)),
                 }),
             ),
-            Task::stream(UnboundedReceiverStream::new(process_message_rx))
-                .map(|msg| match msg {
-                    crate::client::CefIpcMessage::EditableNodeFocused {
-                        browser_id,
-                        x,
-                        y,
-                        width,
-                        height,
-                    } => either::Either::Left(update_focused_editable_node::<Self>(
-                        browser_id.into(),
-                        iced::Rectangle {
-                            x: x as _,
-                            y: y as _,
-                            width: width as _,
-                            height: height as _,
-                        },
-                    )),
-                    crate::client::CefIpcMessage::CaretPositionChanged { browser_id, offset } => {
-                        either::Either::Right(update_caret_offset::<Self>(
-                            browser_id.into(),
-                            offset,
-                        ))
-                    }
-                })
-                .discard(),
+            Task::stream(UnboundedReceiverStream::new(process_message_rx)).map(|msg| match msg {
+                crate::client::CefIpcMessage::EditableNodeFocused {
+                    browser_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                } => CefMessage::EditableNodeFocused(
+                    browser_id.into(),
+                    iced::Rectangle {
+                        x: x as _,
+                        y: y as _,
+                        width: width as _,
+                        height: height as _,
+                    },
+                ),
+                crate::client::CefIpcMessage::CaretPositionChanged { browser_id, offset } => {
+                    CefMessage::UpdateCaretOffset(browser_id.into(), offset)
+                }
+            }),
         ])
     }
 
@@ -296,6 +303,12 @@ impl CefComponent {
                 tracing::info!(?browser_id, "created");
 
                 CefAction::Created(browser_id)
+            }
+            CefMessage::UpdateCaretOffset(browser_id, offset) => {
+                CefAction::Run(update_caret_offset::<Self>(browser_id, offset).discard())
+            }
+            CefMessage::EditableNodeFocused(browser_id, rect) => {
+                CefAction::Run(update_focused_editable_node::<Self>(browser_id, rect).discard())
             }
             CefMessage::Closed(browser_id) => CefAction::Closed(browser_id),
             CefMessage::Loaded(browwser_id) => CefAction::Loaded(browwser_id),

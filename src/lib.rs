@@ -17,6 +17,8 @@ use crate::browser::IcyBrowserProcessHandler;
 use crate::error::Result;
 pub use browser::IcyCefApp;
 use cef::ImplCommandLine;
+use cef::sandbox_destroy;
+use cef::sandbox_initialize;
 use error::CefError;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -76,17 +78,24 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
     };
     let is_browser_process = cmd.has_switch(Some(&cef::CefString::from("type"))) != 1;
 
-    let sandbox = cef::sandbox_info::SandboxInfo::new();
+    let sandbox_info = cef::sandbox_info::SandboxInfo::new();
 
     if !is_browser_process {
+        #[cfg(target_os = "macos")]
+        let sandbox = sandbox_initialize(args.as_main_args().argc, args.as_main_args().argv);
+
         let ret = cef::execute_process(
             Some(args.as_main_args()),
             Some(&mut render_process::RenderApp::new()),
-            sandbox.as_mut_ptr(),
+            sandbox_info.as_mut_ptr(),
         );
         if ret < 0 {
             return Err(CefError::ProcessLaunchFailed);
         }
+
+        #[cfg(target_os = "macos")]
+        sandbox_destroy(sandbox.cast());
+
         // non-browser process does not initialize cef
         return Ok(None);
     }
@@ -97,7 +106,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
     let ret = cef::execute_process(
         Some(args.as_main_args()),
         Some(&mut cef_app),
-        sandbox.as_mut_ptr(),
+        sandbox_info.as_mut_ptr(),
     );
     if ret != -1 {
         return Err(CefError::ProcessLaunchFailed);
@@ -108,7 +117,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
         Some(args.as_main_args()),
         Some(&settings.into_cef_settings()),
         Some(&mut cef_app),
-        sandbox.as_mut_ptr(),
+        sandbox_info.as_mut_ptr(),
     );
     if ret != 1 {
         return Err(CefError::CannotInit(ret));

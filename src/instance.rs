@@ -236,10 +236,6 @@ impl CefComponent {
             render_rx,
         } = subscribers;
         Task::batch([
-            //Task::stream(tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
-            //  Duration::from_millis(60),
-            //)))
-            //.map(|delay| CefMessage::PumpLoop(delay.elapsed())),
             Task::stream(UnboundedReceiverStream::new(render_rx)).map(CefMessage::UpdateView),
             Task::stream(tokio_stream::wrappers::ReceiverStream::new(lifespan_rx)).map(
                 move |event| match event {

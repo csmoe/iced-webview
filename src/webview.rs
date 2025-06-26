@@ -576,9 +576,23 @@ impl CefState {
                 };
                 match delta {
                     iced::mouse::ScrollDelta::Lines { x, y } => {
+                        let y = if y < 0.0 {
+                            -100.0
+                        } else if y > 0.0 {
+                            100.0
+                        } else {
+                            y
+                        };
                         host.send_mouse_wheel_event(Some(&event), x as _, y as _);
                     }
                     iced::mouse::ScrollDelta::Pixels { x, y } => {
+                        let y = if y < 0.0 {
+                            -100.0
+                        } else if y > 0.0 {
+                            100.0
+                        } else {
+                            y
+                        };
                         host.send_mouse_wheel_event(Some(&event), x as _, y as _);
                     }
                 }

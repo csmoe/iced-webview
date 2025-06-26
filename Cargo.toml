@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cef = { git = "https://github.com/tauri-apps/cef-rs", rev = "0ba50de5caae9d76c45cbaf5050c661a6b113b64" }
+cef = "137"
 iced = { git = "https://github.com/iced-rs/iced", features = ["tokio", "advanced", "lazy", "image"] }
 iced_core = { git = "https://github.com/iced-rs/iced" }
 tracing = "0.1"

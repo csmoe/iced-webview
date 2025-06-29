@@ -6,18 +6,39 @@ It's in early development stage, almost a demo to verify the chromium embedded f
 
 ## Development
 
-checkout [cef-rs](https://github.com/tauri-apps/cef-rs) to install needed toolchains.
+1. Download the prebuilt cef binaries
 
-### Windows
+```
+cargo install export-cef-dir
 
-```sh
-# powershell
+# linux/macos
+export CEF_PATH=$(pwd)/target/cef
 
-$env:CEF_PATH="target/"
-$env:PATH += $env:CEF_PATH;
-cargo run --example webview
+# windows powershell
+$env:CEF_PATH="$PWD/target/cef"
+
+export-cef-dir --force $CEF_PATH
 ```
 
-### MacOS
+2. Build
 
-### Linux
+```
+cargo build --example webview --release
+
+# We need to bundle the binary as application on macOS
+./examples/mac_bundler.rs
+```
+
+3. Run the example
+
+```
+# linux
+./target/release/examples/webview
+
+# windows
+cp example/webview.exe.manifest target/release/examples/webview.exe.manifest
+./target/release/examples/webview.exe
+
+# macOS
+open target/release/examples/webview.app
+```

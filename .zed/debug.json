@@ -1,0 +1,13 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "label": "debug example: webview",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "program": "./target/release/examples/webview.app/Contents/MacOS/webview",
+    "args": ["--no-sandbox"]
+  }
+]

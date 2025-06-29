@@ -119,7 +119,7 @@ fn create_info_plist(
             .collect(),
         ls_file_quarantine_enabled: true,
         ls_minimum_system_version: "11.0".to_string(),
-        ls_ui_element: "1".to_string(),
+        ls_ui_element: "0".to_string(),
         ns_supports_automatic_graphics_switching: true,
     };
 
@@ -141,7 +141,7 @@ fn create_info_plist(
 //       - webview Helper.app
 // See https://bitbucket.org/chromiumembedded/cef/wiki/GeneralUsage.md#markdown-header-macos
 pub fn bundle() {
-    let example_path = PathBuf::from("./target/debug/examples");
+    let example_path = PathBuf::from("./target/release/examples");
     let main_app_path = create_app(
         &example_path,
         "webview",
@@ -152,7 +152,7 @@ pub fn bundle() {
     if to.exists() {
         fs::remove_dir_all(&to).unwrap();
     }
-    copy_directory(&example_path.join(FRAMEWORK), &to);
+    copy_directory(&PathBuf::from(std::env::var("CEF_PATH").expect("missing CEF_PATH env")).join(FRAMEWORK), &to);
     HELPERS.iter().for_each(|(kind, helper)| {
         create_app(
             &main_app_path.join(FRAMEWORKS_PATH),

@@ -17,8 +17,6 @@ use crate::browser::IcyBrowserProcessHandler;
 use crate::error::Result;
 pub use browser::IcyCefApp;
 use cef::ImplCommandLine;
-use cef::sandbox_destroy;
-use cef::sandbox_initialize;
 use error::CefError;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -60,7 +58,7 @@ pub fn pre_init_cef() -> Result<cef::library_loader::LibraryLoader> {
     Ok(loader)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "macos"))]
 pub fn pre_init_cef() -> Result<()> {
     let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
     Ok(())
@@ -82,7 +80,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
 
     if !is_browser_process {
         #[cfg(target_os = "macos")]
-        let sandbox = sandbox_initialize(args.as_main_args().argc, args.as_main_args().argv);
+        let sandbox = cef::sandbox_initialize(args.as_main_args().argc, args.as_main_args().argv);
 
         let ret = cef::execute_process(
             Some(args.as_main_args()),
@@ -94,7 +92,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
         }
 
         #[cfg(target_os = "macos")]
-        sandbox_destroy(sandbox.cast());
+        cef::sandbox_destroy(sandbox.cast());
 
         // non-browser process does not initialize cef
         return Ok(None);

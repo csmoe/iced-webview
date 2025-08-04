@@ -80,7 +80,7 @@ impl ImplDisplayHandler for DisplayHandlerBuilder {
         _browser: Option<&mut Browser>,
         #[cfg(target_os = "windows")] _cursor: sys::HCURSOR,
         #[cfg(target_os = "macos")] _cursor: *mut u8,
-        #[cfg(target_os = "linux")] _cursor: c_ulong,
+        #[cfg(target_os = "linux")] _cursor: ::std::os::raw::c_ulong,
         type_: CursorType,
         _custom_cursor_info: Option<&CursorInfo>,
     ) -> ::std::os::raw::c_int {

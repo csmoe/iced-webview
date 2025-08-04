@@ -102,7 +102,7 @@ impl ImplKeyboardHandler for KeyboardHandlerBuilder {
         let ctrl =
             event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN as u32) != 0;
 
-        #[cfg(target_os = "windows")]
+        #[cfg(not(target_os = "macos"))]
         let ctrl =
             event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_CONTROL_DOWN as u32) != 0;
         if event.type_ == cef::sys::cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into() {
@@ -141,7 +141,7 @@ impl ImplKeyboardHandler for KeyboardHandlerBuilder {
         let ctrl =
             event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN as u32) != 0;
 
-        #[cfg(target_os = "windows")]
+        #[cfg(not(target_os = "macos"))]
         let ctrl =
             event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_CONTROL_DOWN as u32) != 0;
         let keydown = event.type_ == cef::sys::cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into();

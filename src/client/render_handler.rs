@@ -11,7 +11,10 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 #[derive(Clone)]
 pub struct IcyRenderHandler {
     state: IcyRenderState,
+    #[cfg(not(feature = "hw-renderer"))]
     tx: UnboundedSender<BrowserId>,
+    #[cfg(feature = "hw-renderer")]
+    cef_bind_group: std::rc::Rc<RefCell<Option<wgpu::BindGroup>>>,
 }
 
 impl IcyRenderHandler {
@@ -22,17 +25,23 @@ impl IcyRenderHandler {
         let device_scale_factor = std::rc::Rc::new(RefCell::new(device_scale_factor));
         let view_rect = std::rc::Rc::new(RefCell::new(view_rect));
         let size = std::rc::Rc::new(RefCell::new((0, 0)));
+        #[cfg(feature = "hw-renderer")]
+        let cef_bind_group = std::rc::Rc::new(RefCell::new(None));
         let (tx, rx) = unbounded_channel();
         let state = IcyRenderState {
             pixels: std::rc::Rc::new(RefCell::new(Vec::with_capacity(1024 * 1024))),
             device_scale_factor,
             view_rect,
             size,
+            #[cfg(feature = "hw-renderer")]
+            cef_bind_group: cef_bind_group.clone(),
         };
         (
             Self {
                 state: state.clone(),
                 tx,
+                #[cfg(feature = "hw-renderer")]
+                cef_bind_group: cef_bind_group.clone(),
             },
             state,
             rx,
@@ -51,6 +60,8 @@ pub struct IcyRenderState {
     pub(crate) device_scale_factor: std::rc::Rc<RefCell<f32>>,
     pub(crate) view_rect: std::rc::Rc<RefCell<cef::Rect>>,
     pub(crate) size: std::rc::Rc<RefCell<(i32, i32)>>,
+    #[cfg(feature = "hw-renderer")]
+    pub(crate) cef_bind_group: std::rc::Rc<RefCell<Option<wgpu::BindGroup>>>,
 }
 
 impl Debug for IcyRenderState {
@@ -161,6 +172,123 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         return false as _;
     }
 
+    #[cfg(feature = "hw-renderer")]
+    fn on_accelerated_paint(
+        &self,
+        _browser: Option<&mut Browser>,
+        _type_: PaintElementType,
+        _dirty_rects_count: usize,
+        _dirty_rects: Option<&Rect>,
+        info: Option<&AcceleratedPaintInfo>,
+    ) {
+        let Some(info) = info else {
+            return;
+        };
+        let format = match info.format.as_ref() {
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888 => wgpu::TextureFormat::Bgra8Unorm,
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => wgpu::TextureFormat::Rgba8Unorm,
+            _ => unreachable!("unsupported color type"),
+        };
+        let texture_desc = wgpu::TextureDescriptor {
+            label: Some("Cef Texture"),
+            size: wgpu::Extent3d {
+                width: info.extra.coded_size.width as _,
+                height: info.extra.coded_size.height as _,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        };
+        let handle = windows::Win32::Foundation::HANDLE(info.shared_texture_handle.cast());
+        let Some(device) = iced_wgpu::window::compositor::hack_wgpu::get_wgpu_device() else {
+            eprintln!("NO WGPU DEVICE");
+            return;
+        };
+        let resource = unsafe {
+            device.as_hal::<wgpu::wgc::api::Dx12>().map(|hdevice| {
+                let raw_device = hdevice.raw_device();
+
+                let mut resource = None::<windows::Win32::Graphics::Direct3D12::ID3D12Resource>;
+                match raw_device.OpenSharedHandle(handle, &mut resource) {
+                    Ok(_) => Ok(resource.unwrap()),
+                    Err(e) => Err(e),
+                }
+            })
+        };
+        let resource = resource.unwrap().unwrap();
+
+        let src_texture = unsafe {
+            let texture = <wgpu::wgc::api::Dx12 as wgpu::hal::Api>::Device::texture_from_raw(
+                resource,
+                texture_desc.format,
+                texture_desc.dimension,
+                texture_desc.size,
+                1,
+                1,
+            );
+
+            device.create_texture_from_hal::<wgpu::wgc::api::Dx12>(texture, &texture_desc)
+        };
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Cef Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Cef Texture Bind Group"),
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&src_texture.create_view(
+                        &wgpu::TextureViewDescriptor {
+                            label: Some("Cef Texture View"),
+                            ..Default::default()
+                        },
+                    )),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        self.handler.cef_bind_group.borrow_mut().replace(bind_group);
+    }
+
+    #[cfg(not(feature = "hw-renderer"))]
     fn on_paint(
         &self,
         browser: Option<&mut Browser>,
@@ -225,5 +353,259 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         pixels.shrink_to_fit();
 
         _ = self.handler.tx.send(browser_id);
+    }
+}
+
+#[cfg(feature = "hw-renderer")]
+pub(crate) mod hw_renderer {
+    pub struct CefPipeline {
+        pipeline: wgpu::RenderPipeline,
+        quad: Geometry,
+        //cef_bind_group: std::rc::Rc<RefCell<Option<wgpu::BindGroup>>>,
+    }
+
+    impl CefPipeline {
+        pub fn new(device: &wgpu::Device) -> Self {
+            let texture_bind_group_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Cef Texture Bind Group Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Cef Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            });
+
+            let render_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Cef Pipeline Layout"),
+                    bind_group_layouts: &[&texture_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Cef Render Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[Vertex::desc()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent::OVER,
+                            alpha: wgpu::BlendComponent::OVER,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+            Self {
+                pipeline,
+                quad: Geometry::new(&device),
+            }
+        }
+
+        fn render(
+            &self,
+            target: &wgpu::TextureView,
+            encoder: &mut wgpu::CommandEncoder,
+            bind_group: &wgpu::BindGroup,
+            _viewport: iced::Rectangle<u32>,
+        ) {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Cef Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                ..Default::default()
+            });
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(0, bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.quad.vertex_buffer.slice(..));
+            render_pass.draw(0..self.quad.vertex_count, 0..1);
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+    struct Vertex {
+        position: [f32; 3],
+        tex_coords: [f32; 2],
+    }
+
+    impl Vertex {
+        const ATTRIBS: [wgpu::VertexAttribute; 2] =
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+
+        fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+            wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &Self::ATTRIBS,
+            }
+        }
+    }
+
+    struct Geometry {
+        vertex_buffer: wgpu::Buffer,
+        vertex_count: u32,
+    }
+
+    impl Geometry {
+        fn new(device: &wgpu::Device) -> Self {
+            use wgpu::util::DeviceExt as _;
+
+            let x = -1.0;
+            let y = 1.0;
+            let width = 2.0;
+            let height = 2.0;
+            let z = 1.0;
+
+            let vertices = [
+                Vertex {
+                    position: [x, y, z],
+                    tex_coords: [0.0, 0.0],
+                },
+                Vertex {
+                    position: [x + width, y, z],
+                    tex_coords: [1.0, 0.0],
+                },
+                Vertex {
+                    position: [x, y - height, z],
+                    tex_coords: [0.0, 1.0],
+                },
+                Vertex {
+                    position: [x + width, y - height, z],
+                    tex_coords: [1.0, 1.0],
+                },
+            ];
+
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Quad Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+            Self {
+                vertex_buffer,
+                vertex_count: vertices.len() as u32,
+            }
+        }
+    }
+
+    pub struct CefWebview {
+        bind_group: wgpu::BindGroup,
+    }
+
+    impl CefWebview {
+        pub fn new(bind_group: wgpu::BindGroup) -> Self {
+            Self { bind_group }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Primitive {
+        bind_group: wgpu::BindGroup,
+    }
+
+    impl Primitive {
+        fn new(bind_group: wgpu::BindGroup) -> Self {
+            Self { bind_group }
+        }
+    }
+
+    impl<Message> iced::widget::shader::Program<Message> for CefWebview {
+        type State = ();
+        type Primitive = Primitive;
+
+        fn draw(
+            &self,
+            _state: &Self::State,
+            _cursor: iced::mouse::Cursor,
+            _bounds: iced::Rectangle,
+        ) -> Self::Primitive {
+            Primitive::new(self.bind_group.clone())
+        }
+    }
+
+    impl iced::widget::shader::Primitive for Primitive {
+        fn prepare(
+            &self,
+            device: &wgpu::Device,
+            _queue: &wgpu::Queue,
+            _format: wgpu::TextureFormat,
+            storage: &mut iced::widget::shader::Storage,
+            _bounds: &iced::Rectangle,
+            _viewport: &iced::widget::shader::Viewport,
+        ) {
+            if !storage.has::<CefPipeline>() {
+                storage.store(CefPipeline::new(
+                    device,
+                    //queue,
+                    //format,
+                    //viewport.physical_size(),
+                ));
+            }
+        }
+
+        fn render(
+            &self,
+            encoder: &mut wgpu::CommandEncoder,
+            storage: &iced::widget::shader::Storage,
+            target: &wgpu::TextureView,
+            clip_bounds: &iced::Rectangle<u32>,
+        ) {
+            // At this point our pipeline should always be initialized
+            let pipeline = storage.get::<CefPipeline>().unwrap();
+
+            // Render primitive
+            pipeline.render(target, encoder, &self.bind_group, *clip_bounds);
+        }
     }
 }

@@ -1,4 +1,4 @@
-use super::instance::{get_cursor_type, get_pixels, resize};
+use super::instance::{get_cursor_type, resize};
 use crate::BrowserId;
 use cef::{ImplBrowser, ImplBrowserHost};
 use iced::advanced::widget;
@@ -20,9 +20,21 @@ use iced::{
 use iced_core;
 
 pub fn webview<'a, Message: 'a>(browser_id: BrowserId, size: iced::Size) -> Webview<'a, Message> {
-    let content = get_pixels::<Message>(browser_id).map_or_else(
+    #[cfg(not(feature = "hw-renderer"))]
+    let content = crate::instance::get_pixels::<Message>(browser_id).map_or_else(
         || Element::from(horizontal_space().width(0)),
         |img| img.width(size.width).height(size.height).into(),
+    );
+
+    #[cfg(feature = "hw-renderer")]
+    let content = crate::instance::get_shader::<Message>(browser_id).map_or_else(
+        || Element::from(horizontal_space().width(0)),
+        |shader| {
+            iced::widget::shader(shader)
+                .width(size.width)
+                .height(size.height)
+                .into()
+        },
     );
     Webview::new(browser_id, content)
 }
@@ -668,22 +680,22 @@ where
         vec![Tree::new(&self.content)]
     }
 
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&[&self.content]);
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(&mut [&mut self.content]);
     }
 
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fill, Length::Fill)
     }
 
-    fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         let _state = tree.state.downcast_mut::<CefState>();
 
         // generate the child layout
-        let child_layout = self
-            .content
-            .as_widget()
-            .layout(&mut tree.children[0], renderer, limits);
+        let child_layout =
+            self.content
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, limits);
 
         Node::with_children(child_layout.size(), vec![child_layout])
     }
@@ -752,7 +764,7 @@ where
     }
 
     fn operate(
-        &self,
+        &mut self,
         state: &mut Tree,
         layout: Layout<'_>,
         _renderer: &Renderer,

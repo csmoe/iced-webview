@@ -3,10 +3,17 @@ name = "iced-webview"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+hw-renderer = []
+
 [dependencies]
 cef = "137"
-iced = { git = "https://github.com/iced-rs/iced", features = ["tokio", "advanced", "lazy", "image"] }
-iced_core = { git = "https://github.com/iced-rs/iced" }
+
+iced = { git = "https://github.com/csmoe/iced", features = ["tokio", "advanced", "lazy", "image", "hack-wgpu"], branch = "hack-wgpu" }
+iced_core = { git = "https://github.com/csmoe/iced" , branch = "hack-wgpu" }
+iced_wgpu = { git = "https://github.com/csmoe/iced", features = [ "hack-wgpu" ], branch = "hack-wgpu" }
+
 tracing = "0.1"
 tokio = { version = "1", features = ["sync"] }
 camino = "1"
@@ -18,6 +25,11 @@ anyhow = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 either = "1"
+wgpu = "26"
+bytemuck = "1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [ "Win32_Graphics_Direct3D12" ] }
 
 [dev-dependencies]
 anyhow = "1"

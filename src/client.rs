@@ -8,9 +8,8 @@ use cef::{
 };
 use context_menu_handler::{ContextMenuHandlerBuilder, IcyContextMenuHandler};
 use keyboard_handler::{IcyKeyboardHandler, IcyKeyboardState, KeyboardHandlerBuilder};
-pub use lifespan_handler::LifeSpanEvent;
 use lifespan_handler::{IcyLifeSpanHandler, LifeSpanHandlerBuilder};
-pub use load_handler::LoadEvent;
+
 use load_handler::{IcyLoadHandler, LoadHandlerBuilder};
 use render_handler::{IcyRenderHandler, IcyRenderState, RenderHandlerBuilder};
 use std::ptr::null_mut;
@@ -26,6 +25,12 @@ mod keyboard_handler;
 mod lifespan_handler;
 mod load_handler;
 mod render_handler;
+
+pub use lifespan_handler::LifeSpanEvent;
+pub use load_handler::LoadEvent;
+
+#[cfg(feature = "hw-renderer")]
+pub use render_handler::hw_renderer::CefWebview;
 
 pub struct ClientEventSubscriber {
     pub lifespan_rx: Receiver<LifeSpanEvent>,

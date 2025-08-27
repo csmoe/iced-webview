@@ -1,9 +1,7 @@
 use crate::{
     BrowserId,
-    {
-        client::ClientEventSubscriber, webview::update_caret_offset,
-        webview::update_focused_editable_node,
-    },
+    client::ClientEventSubscriber,
+    webview::{update_caret_offset, update_focused_editable_node},
 };
 use crate::{
     client::{ClientBuilder, IcyClient, IcyClientState, LifeSpanEvent, LoadEvent},
@@ -11,7 +9,7 @@ use crate::{
 };
 use cef;
 use cef::*;
-use iced::{Element, Subscription, Task, widget::Image, window};
+use iced::{Element, Subscription, Task, window};
 use std::{
     cell::RefCell, collections::BTreeMap, fmt::Debug, sync::atomic::AtomicUsize, time::Duration,
 };
@@ -117,16 +115,31 @@ pub(crate) fn remove_webview(browser_id: BrowserId) {
     });
 }
 
-pub(crate) fn get_pixels<Message>(browser_id: BrowserId) -> Option<Image> {
+#[cfg(not(feature = "hw-renderer"))]
+pub(crate) fn get_pixels<Message>(browser_id: BrowserId) -> Option<iced::widget::Image> {
     use iced::widget::image::Handle;
     WEBVIEW_STATES.with_borrow(|states| {
         states.get(&browser_id).map(|state| {
             let (width, height) = state.render.size();
-            Image::new(Handle::from_rgba(
+            iced::widget::Image::new(Handle::from_rgba(
                 width as _,
                 height as _,
                 state.render.pixels().clone(),
             ))
+        })
+    })
+}
+
+#[cfg(feature = "hw-renderer")]
+pub(crate) fn get_shader<Message>(browser_id: BrowserId) -> Option<crate::client::CefWebview> {
+    WEBVIEW_STATES.with_borrow(|states| {
+        states.get(&browser_id).and_then(|state| {
+            state
+                .render
+                .cef_bind_group
+                .borrow()
+                .clone()
+                .map(|group| crate::client::CefWebview::new(group))
         })
     })
 }
@@ -187,6 +200,7 @@ impl CefComponent {
 
         let mut windowinfo = cef::WindowInfo {
             windowless_rendering_enabled: true as _,
+            shared_texture_enabled: cfg!(feature = "hw-renderer") as _,
             ..Default::default()
         };
 

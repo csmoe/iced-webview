@@ -25,6 +25,10 @@ export-cef-dir --force $CEF_PATH
 ```
 cargo build --example webview --release
 
+# windows gpu rendering
+$env:WGPU_BACKEND="dx12";
+cargo build --example webview --release --features hw-renderer
+
 # We need to bundle the binary as application on macOS
 ./examples/mac_bundler.rs
 ```

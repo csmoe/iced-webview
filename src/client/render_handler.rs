@@ -11,7 +11,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 #[derive(Clone)]
 pub struct IcyRenderHandler {
     state: IcyRenderState,
-    #[cfg(not(feature = "hw-renderer"))]
     tx: UnboundedSender<BrowserId>,
     #[cfg(feature = "hw-renderer")]
     cef_bind_group: std::rc::Rc<RefCell<Option<wgpu::BindGroup>>>,

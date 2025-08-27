@@ -1,9 +1,7 @@
 use crate::{
     BrowserId,
-    {
-        client::ClientEventSubscriber, webview::update_caret_offset,
-        webview::update_focused_editable_node,
-    },
+    client::{CefWebview, ClientEventSubscriber},
+    webview::{update_caret_offset, update_focused_editable_node},
 };
 use crate::{
     client::{ClientBuilder, IcyClient, IcyClientState, LifeSpanEvent, LoadEvent},
@@ -127,6 +125,19 @@ pub(crate) fn get_pixels<Message>(browser_id: BrowserId) -> Option<Image> {
                 height as _,
                 state.render.pixels().clone(),
             ))
+        })
+    })
+}
+
+pub(crate) fn get_shader<Message>(browser_id: BrowserId) -> Option<CefWebview> {
+    WEBVIEW_STATES.with_borrow(|states| {
+        states.get(&browser_id).and_then(|state| {
+            state
+                .render
+                .cef_bind_group
+                .borrow()
+                .clone()
+                .map(|group| CefWebview::new(group))
         })
     })
 }

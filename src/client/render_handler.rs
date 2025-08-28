@@ -202,35 +202,85 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         };
-        let handle = windows::Win32::Foundation::HANDLE(info.shared_texture_handle.cast());
         let Some(device) = iced_wgpu::window::compositor::hack_wgpu::get_wgpu_device() else {
             eprintln!("NO WGPU DEVICE");
             return;
         };
-        let resource = unsafe {
-            device.as_hal::<wgpu::wgc::api::Dx12>().map(|hdevice| {
-                let raw_device = hdevice.raw_device();
+        #[cfg(target_os = "windows")]
+        let src_texture = {
+            let handle = windows::Win32::Foundation::HANDLE(info.shared_texture_handle.cast());
+            let resource = unsafe {
+                device.as_hal::<wgpu::wgc::api::Dx12>().map(|hdevice| {
+                    let raw_device = hdevice.raw_device();
 
-                let mut resource = None::<windows::Win32::Graphics::Direct3D12::ID3D12Resource>;
-                match raw_device.OpenSharedHandle(handle, &mut resource) {
-                    Ok(_) => Ok(resource.unwrap()),
-                    Err(e) => Err(e),
-                }
-            })
+                    let mut resource = None::<windows::Win32::Graphics::Direct3D12::ID3D12Resource>;
+                    match raw_device.OpenSharedHandle(handle, &mut resource) {
+                        Ok(_) => Ok(resource.unwrap()),
+                        Err(e) => Err(e),
+                    }
+                })
+            };
+            let resource = resource.unwrap().unwrap();
+
+            unsafe {
+                let texture = <wgpu::wgc::api::Dx12 as wgpu::hal::Api>::Device::texture_from_raw(
+                    resource,
+                    texture_desc.format,
+                    texture_desc.dimension,
+                    texture_desc.size,
+                    1,
+                    1,
+                );
+
+                device.create_texture_from_hal::<wgpu::wgc::api::Dx12>(texture, &texture_desc)
+            }
         };
-        let resource = resource.unwrap().unwrap();
 
+        #[cfg(target_os = "macos")]
         let src_texture = unsafe {
-            let texture = <wgpu::wgc::api::Dx12 as wgpu::hal::Api>::Device::texture_from_raw(
-                resource,
+            use io_surface::IOSurfaceRef;
+            let Some(io_surface) =
+                std::ptr::NonNull::new(info.shared_texture_io_surface.cast::<IOSurfaceRef>())
+            else {
+                return;
+            };
+
+            let metal_desc = metal::TextureDescriptor::new();
+            metal_desc.set_width(texture_desc.size.width as _);
+            metal_desc.set_height(texture_desc.size.height as _);
+            metal_desc.set_array_length(texture_desc.array_layer_count() as _);
+            metal_desc.set_mipmap_level_count(texture_desc.mip_level_count as _);
+            metal_desc.set_sample_count(texture_desc.sample_count as _);
+            metal_desc.set_texture_type(metal::MTLTextureType::D2);
+            metal_desc.set_pixel_format(match texture_desc.format {
+                wgpu::TextureFormat::Rgba8Unorm => metal::MTLPixelFormat::RGBA8Unorm,
+                wgpu::TextureFormat::Bgra8Unorm => metal::MTLPixelFormat::BGRA8Unorm,
+                _ => unimplemented!(),
+            });
+            metal_desc.set_usage(metal::MTLTextureUsage::ShaderRead);
+            metal_desc.set_storage_mode(metal::MTLStorageMode::Managed);
+            let texture = device.as_hal::<wgpu::wgc::api::Metal>().map(|hdevice| {
+                use objc::*;
+                objc::msg_send![std::mem::transmute::<_,&metal::NSObject>(
+                    hdevice.raw_device().lock().as_ref()),
+                    newTextureWithDescriptor:std::mem::transmute::<_,&metal::NSObject>(metal_desc.as_ref())
+                    iosurface:io_surface
+                    plane:0]
+            }).unwrap();
+            let hal_tex = <wgpu::wgc::api::Metal as wgpu::hal::Api>::Device::texture_from_raw(
+                texture,
                 texture_desc.format,
-                texture_desc.dimension,
-                texture_desc.size,
-                1,
-                1,
+                metal::MTLTextureType::D2,
+                texture_desc.array_layer_count(),
+                texture_desc.mip_level_count,
+                wgpu::hal::CopyExtent {
+                    width: texture_desc.size.width,
+                    height: texture_desc.size.height,
+                    depth: texture_desc.array_layer_count(),
+                },
             );
 
-            device.create_texture_from_hal::<wgpu::wgc::api::Dx12>(texture, &texture_desc)
+            device.create_texture_from_hal::<wgpu::wgc::api::Metal>(hal_tex, &texture_desc)
         };
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {

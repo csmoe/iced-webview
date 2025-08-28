@@ -104,7 +104,7 @@ fn create_info_plist(
             match helper_kind {
                 Some(kind) if kind == "" => format!(".helper"),
                 Some(kind) => format!(".helper.{kind}"),
-                None => String::new(),
+                None => String::from(".webview"),
             }
         ),
         cf_bundle_info_dictionary_version: "6.0".to_string(),
@@ -119,7 +119,7 @@ fn create_info_plist(
             .collect(),
         ls_file_quarantine_enabled: true,
         ls_minimum_system_version: "11.0".to_string(),
-        ls_ui_element: "0".to_string(),
+        ls_ui_element: if helper_kind.is_some() { "1" } else { "0" }.to_string(),
         ns_supports_automatic_graphics_switching: true,
     };
 
@@ -152,7 +152,10 @@ pub fn bundle() {
     if to.exists() {
         fs::remove_dir_all(&to).unwrap();
     }
-    copy_directory(&PathBuf::from(std::env::var("CEF_PATH").expect("missing CEF_PATH env")).join(FRAMEWORK), &to);
+    copy_directory(
+        &PathBuf::from(std::env::var("CEF_PATH").expect("missing CEF_PATH env")).join(FRAMEWORK),
+        &to,
+    );
     HELPERS.iter().for_each(|(kind, helper)| {
         create_app(
             &main_app_path.join(FRAMEWORKS_PATH),

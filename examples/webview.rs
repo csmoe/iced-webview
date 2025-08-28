@@ -115,7 +115,7 @@ impl Example {
         }
     }
 
-    fn view(&self, id: window::Id) -> Element<Message> {
+    fn view(&self, id: window::Id) -> Element<'_, Message> {
         if let Some(browser_id) = self.current_browser_id {
             self.cef.view(browser_id).map(Message::Cef).into()
         } else {

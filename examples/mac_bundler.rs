@@ -104,7 +104,7 @@ fn create_info_plist(
             match helper_kind {
                 Some(kind) if kind == "" => format!(".helper"),
                 Some(kind) => format!(".helper.{kind}"),
-                None => String::new(),
+                None => String::from(".webview"),
             }
         ),
         cf_bundle_info_dictionary_version: "6.0".to_string(),

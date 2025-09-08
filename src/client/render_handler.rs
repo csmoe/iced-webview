@@ -180,6 +180,8 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         _dirty_rects: Option<&Rect>,
         info: Option<&AcceleratedPaintInfo>,
     ) {
+        use wgpu::wgc::device::queue::Queue;
+
         let Some(info) = info else {
             return;
         };
@@ -204,6 +206,10 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         };
         let Some(device) = iced_wgpu::window::compositor::hack_wgpu::get_wgpu_device() else {
             eprintln!("NO WGPU DEVICE");
+            return;
+        };
+        let Some(queue) = iced_wgpu::window::compositor::hack_wgpu::get_wgpu_queue() else {
+            eprintln!("NO WGPU QUEUE");
             return;
         };
         #[cfg(target_os = "windows")]
@@ -283,6 +289,34 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             device.create_texture_from_hal::<wgpu::wgc::api::Metal>(hal_tex, &texture_desc)
         };
 
+        let dst_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Cef Dst Copy Texture"),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            ..texture_desc
+        });
+
+        let texture_view = dst_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Cef Texture Copy View"),
+            ..Default::default()
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Cef Texture Copy Encoder"),
+        });
+
+        wgpu::util::TextureBlitter::new(&device, texture_desc.format).copy(
+            &device,
+            &mut encoder,
+            &src_texture.create_view(&Default::default()),
+            &texture_view,
+        );
+        queue.submit(Some(encoder.finish()));
+        if let Err(err) = device.poll(wgpu::PollType::Wait) {
+            eprintln!("cannot poll wgpu device {err:?}");
+        }
+
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -321,7 +355,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&src_texture.create_view(
+                    resource: wgpu::BindingResource::TextureView(&dst_texture.create_view(
                         &wgpu::TextureViewDescriptor {
                             label: Some("Cef Texture View"),
                             ..Default::default()

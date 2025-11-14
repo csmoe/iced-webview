@@ -40,6 +40,7 @@ impl CefSettings {
             external_message_pump: true as _,
             accept_language_list: locale.unwrap_or("en-US".into()).as_str().into(),
             log_file: log_file_path.as_str().into(),
+            no_sandbox: true as _,
             ..Default::default()
         };
         settings

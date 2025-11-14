@@ -1,4 +1,3 @@
-use crate::BrowserId;
 use cef::{self, DisplayHandler, ImplBrowser};
 use cef::{
     Client, ContextMenuHandler, ImplClient, ImplProcessMessage, KeyboardHandler, LifeSpanHandler,
@@ -29,14 +28,13 @@ mod render_handler;
 pub use lifespan_handler::LifeSpanEvent;
 pub use load_handler::LoadEvent;
 
-#[cfg(feature = "hw-renderer")]
-pub use render_handler::hw_renderer::CefWebview;
+pub use render_handler::CefFrame;
 
 pub struct ClientEventSubscriber {
     pub lifespan_rx: Receiver<LifeSpanEvent>,
     pub load_rx: UnboundedReceiver<LoadEvent>,
     pub process_message_rx: UnboundedReceiver<CefIpcMessage>,
-    pub render_rx: UnboundedReceiver<BrowserId>,
+    pub render_rx: UnboundedReceiver<CefFrame>,
 }
 
 pub struct IcyClient {

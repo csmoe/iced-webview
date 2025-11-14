@@ -28,7 +28,6 @@ pub use instance::CefAction;
 pub use instance::CefComponent;
 pub use instance::CefMessage;
 pub use webview::Webview;
-pub use webview::close_webview;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash, Ord)]
 pub struct BrowserId(i32);
@@ -76,23 +75,15 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
     };
     let is_browser_process = cmd.has_switch(Some(&cef::CefString::from("type"))) != 1;
 
-    let sandbox_info = cef::sandbox_info::SandboxInfo::new();
-
     if !is_browser_process {
-        #[cfg(target_os = "macos")]
-        let sandbox = cef::sandbox_initialize(args.as_main_args().argc, args.as_main_args().argv);
-
         let ret = cef::execute_process(
             Some(args.as_main_args()),
             Some(&mut render_process::RenderApp::new()),
-            sandbox_info.as_mut_ptr(),
+            std::ptr::null_mut(),
         );
         if ret < 0 {
             return Err(CefError::ProcessLaunchFailed);
         }
-
-        #[cfg(target_os = "macos")]
-        cef::sandbox_destroy(sandbox.cast());
 
         // non-browser process does not initialize cef
         return Ok(None);
@@ -104,7 +95,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
     let ret = cef::execute_process(
         Some(args.as_main_args()),
         Some(&mut cef_app),
-        sandbox_info.as_mut_ptr(),
+        std::ptr::null_mut(),
     );
     if ret != -1 {
         return Err(CefError::ProcessLaunchFailed);
@@ -115,7 +106,7 @@ pub fn init_cef() -> Result<Option<(IcyCefApp, UnboundedReceiver<BrowserProcessM
         Some(args.as_main_args()),
         Some(&settings.into_cef_settings()),
         Some(&mut cef_app),
-        sandbox_info.as_mut_ptr(),
+        std::ptr::null_mut(),
     );
     if ret != 1 {
         return Err(CefError::CannotInit(ret));

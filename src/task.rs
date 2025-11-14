@@ -29,12 +29,12 @@ impl<T> Future for PostTaskFuture<T> {
     }
 }
 
-pub struct IcyTask<F: FnOnce()> {
+pub struct IcyTask<F: FnOnce() + Send + 'static> {
     object: *mut RcImpl<cef::sys::cef_task_t, Self>,
     func: std::rc::Rc<RefCell<Option<F>>>,
 }
 
-impl<F: FnOnce()> IcyTask<F> {
+impl<F: FnOnce() + Send + 'static> IcyTask<F> {
     pub(crate) fn build(task: F) -> Task {
         Task::new(Self {
             object: null_mut(),
@@ -43,7 +43,7 @@ impl<F: FnOnce()> IcyTask<F> {
     }
 }
 
-impl<F: FnOnce()> Rc for IcyTask<F> {
+impl<F: FnOnce() + Send + 'static> Rc for IcyTask<F> {
     fn as_base(&self) -> &cef::sys::cef_base_ref_counted_t {
         unsafe {
             let base = &*self.object;
@@ -52,7 +52,7 @@ impl<F: FnOnce()> Rc for IcyTask<F> {
     }
 }
 
-impl<F: FnOnce()> Clone for IcyTask<F> {
+impl<F: FnOnce() + Send + 'static> Clone for IcyTask<F> {
     fn clone(&self) -> Self {
         let object = unsafe {
             let rc_impl = &mut *self.object;
@@ -66,13 +66,13 @@ impl<F: FnOnce()> Clone for IcyTask<F> {
         }
     }
 }
-impl<F: FnOnce()> WrapTask for IcyTask<F> {
+impl<F: FnOnce() + Send + 'static> WrapTask for IcyTask<F> {
     fn wrap_rc(&mut self, object: *mut RcImpl<cef::sys::_cef_task_t, Self>) {
         self.object = object;
     }
 }
 
-impl<F: FnOnce()> ImplTask for IcyTask<F> {
+impl<F: FnOnce() + Send + 'static> ImplTask for IcyTask<F> {
     fn get_raw(&self) -> *mut cef::sys::_cef_task_t {
         self.object.cast()
     }
@@ -86,7 +86,10 @@ impl<F: FnOnce()> ImplTask for IcyTask<F> {
 }
 
 #[allow(unused)]
-pub fn cef_post_task<F: FnOnce()>(thread_id: cef::ThreadId, task: F) -> Result<()> {
+pub fn cef_post_task<F: FnOnce() + Send + 'static>(
+    thread_id: cef::ThreadId,
+    task: F,
+) -> Result<()> {
     if currently_on(thread_id) == 1 {
         task();
         return Ok(());
@@ -101,7 +104,7 @@ pub fn cef_post_task<F: FnOnce()>(thread_id: cef::ThreadId, task: F) -> Result<(
 }
 
 #[allow(unused)]
-pub fn cef_post_delayed_task<F: FnOnce()>(
+pub fn cef_post_delayed_task<F: FnOnce() + Send + 'static>(
     thread_id: cef::ThreadId,
     delayed_ms: Duration,
     task: F,

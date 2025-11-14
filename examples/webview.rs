@@ -1,11 +1,9 @@
 #![allow(unused)]
 
-use iced::widget::horizontal_space;
 use iced::window;
 use iced::{Element, Subscription, Task};
 use iced_webview::{
-    BrowserId, CefAction, CefComponent, CefMessage, IcyCefApp, close_webview, init_cef,
-    pre_init_cef,
+    BrowserId, CefAction, CefComponent, CefMessage, IcyCefApp, init_cef, pre_init_cef,
 };
 use std::cell::RefCell;
 use std::time::Duration;
@@ -13,32 +11,26 @@ use std::time::Duration;
 fn main() -> iced::Result {
     let _pre = pre_init_cef();
     let (icy_cef_app, _browser_process_rx) = match init_cef() {
-        Ok(Some((app, browser_process_rx))) => (
-            RefCell::new(Some(app)),
-            RefCell::new(Some(browser_process_rx)),
-        ),
+        Ok(Some((app, browser_process_rx))) => {
+            (RefCell::new(app), RefCell::new(Some(browser_process_rx)))
+        }
         Ok(None) => return Ok(()),
         Err(err) => {
             eprintln!("cannot initailize cef: {err:?}");
             std::process::exit(1);
         }
     };
-
-    iced::daemon(
-        move || Example::new(icy_cef_app.borrow_mut().take().unwrap()),
-        Example::update,
-        Example::view,
-    )
-    .subscription(Example::subscription)
-    .run()
+    iced::daemon(Example::new, Example::update, Example::view)
+        .subscription(Example::subscription)
+        .run()
 }
 
 struct Example {
-    icy_cef_app: IcyCefApp,
     cef: CefComponent,
     current_browser_id: Option<BrowserId>,
 }
 
+#[derive(Clone)]
 enum Message {
     WindowOpened(window::Id),
     Cef(CefMessage),
@@ -60,13 +52,12 @@ impl std::fmt::Debug for Message {
 }
 
 impl Example {
-    fn new(icy_cef_app: IcyCefApp) -> (Self, Task<Message>) {
+    fn new() -> (Self, Task<Message>) {
         let (_, open) = window::open(window::Settings::default());
         (
             Self {
-                icy_cef_app,
                 current_browser_id: None,
-                cef: CefComponent {},
+                cef: CefComponent::new(),
             },
             open.map(Message::WindowOpened),
         )
@@ -74,14 +65,10 @@ impl Example {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::WindowOpened(id) => window::get_position(id)
-                .and_then(move |position| {
-                    window::get_scale_factor(id).map(move |factor| (position, factor))
-                })
-                .then(move |(position, factor)| {
-                    window::get_size(id).map(move |size| (position, factor, size))
-                })
-                .map(move |(position, factor, size)| {
+            Message::WindowOpened(id) => self
+                .cef
+                .get_window_info(id)
+                .map(move |(id, position, size, factor)| {
                     CefMessage::Create(
                         id,
                         "https://testufo.com".parse().unwrap(),
@@ -91,13 +78,7 @@ impl Example {
                     )
                 })
                 .map(Message::Cef),
-            Message::CloseWindow(_) => {
-                if let Some(browser_id) = self.current_browser_id.take() {
-                    close_webview(browser_id).map(Message::Cef)
-                } else {
-                    Task::none()
-                }
-            }
+            Message::CloseWindow(_) => Task::none(),
             Message::Cef(cef_message) => match self.cef.update(cef_message) {
                 CefAction::Created(browser_id) => {
                     self.current_browser_id = Some(browser_id);
@@ -105,7 +86,6 @@ impl Example {
                 }
                 CefAction::Run(task) => task.map(Message::Cef),
                 CefAction::Loaded(browser_id) => Task::none(),
-                CefAction::UpdateView(browser_id) => Task::none(),
                 CefAction::Closed(browser_id) => {
                     cef::shutdown();
                     iced::exit()
@@ -117,9 +97,9 @@ impl Example {
 
     fn view(&self, id: window::Id) -> Element<'_, Message> {
         if let Some(browser_id) = self.current_browser_id {
-            self.cef.view(browser_id).map(Message::Cef).into()
+            self.cef.view().map(Message::Cef).into()
         } else {
-            horizontal_space().width(0).into()
+            iced::widget::space().width(0).into()
         }
     }
 

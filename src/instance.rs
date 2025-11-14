@@ -1,7 +1,6 @@
 use crate::{
     BrowserId,
-    client::ClientEventSubscriber,
-    webview::{update_caret_offset, update_focused_editable_node},
+    client::{CefFrame, ClientEventSubscriber},
 };
 use crate::{
     client::{ClientBuilder, IcyClient, IcyClientState, LifeSpanEvent, LoadEvent},
@@ -20,7 +19,6 @@ pub enum CefAction {
     Run(Task<CefMessage>),
     Created(BrowserId),
     Closed(BrowserId),
-    UpdateView(BrowserId),
     None,
 }
 
@@ -33,7 +31,7 @@ pub enum CefMessage {
     UpdateCaretOffset(BrowserId, f32),
     EditableNodeFocused(BrowserId, iced::Rectangle),
     PumpLoop(Duration),
-    UpdateView(BrowserId),
+    UpdateView(CefFrame),
 }
 
 impl std::fmt::Debug for CefMessage {
@@ -74,9 +72,6 @@ impl std::fmt::Debug for CefAction {
             CefAction::Created(browser_id) => f.debug_tuple("Created").field(browser_id).finish(),
             CefAction::Closed(browser_id) => f.debug_tuple("Closed").field(browser_id).finish(),
             CefAction::None => f.debug_tuple("None").finish(),
-            CefAction::UpdateView(browser_id) => {
-                f.debug_tuple("UpdateView").field(browser_id).finish()
-            }
         }
     }
 }
@@ -115,7 +110,6 @@ pub(crate) fn remove_webview(browser_id: BrowserId) {
     });
 }
 
-#[cfg(not(feature = "hw-renderer"))]
 pub(crate) fn get_pixels<Message>(browser_id: BrowserId) -> Option<iced::widget::Image> {
     use iced::widget::image::Handle;
     WEBVIEW_STATES.with_borrow(|states| {
@@ -130,20 +124,6 @@ pub(crate) fn get_pixels<Message>(browser_id: BrowserId) -> Option<iced::widget:
     })
 }
 
-#[cfg(feature = "hw-renderer")]
-pub(crate) fn get_shader<Message>(browser_id: BrowserId) -> Option<crate::client::CefWebview> {
-    WEBVIEW_STATES.with_borrow(|states| {
-        states.get(&browser_id).and_then(|state| {
-            state
-                .render
-                .cef_bind_group
-                .borrow()
-                .clone()
-                .map(|group| crate::client::CefWebview::new(group))
-        })
-    })
-}
-
 pub(crate) fn get_cursor_type(browser_id: BrowserId) -> Option<cef::CursorType> {
     WEBVIEW_STATES.with_borrow(|states| {
         states
@@ -152,10 +132,18 @@ pub(crate) fn get_cursor_type(browser_id: BrowserId) -> Option<cef::CursorType> 
     })
 }
 
-pub(crate) fn resize(browser_id: BrowserId, bound: cef::Rect) {
+pub(crate) fn resize(browser_id: BrowserId, bound: iced::Rectangle) {
     WEBVIEW_STATES.with_borrow_mut(|states| {
-        if let Some(state) = states.get(&browser_id) {
-            state.render.set_view_rect(bound);
+        if let Some(state) = states.get(&browser_id)
+            && bound.width > 0.0
+            && bound.height > 0.0
+        {
+            state.render.set_view_rect(cef::Rect {
+                x: bound.x as i32,
+                y: bound.y as i32,
+                width: bound.width as i32,
+                height: bound.height as i32,
+            });
             if let Some(host) =
                 browser_host_get_browser_by_identifier(browser_id.inner()).and_then(|b| b.host())
             {
@@ -165,24 +153,25 @@ pub(crate) fn resize(browser_id: BrowserId, bound: cef::Rect) {
     })
 }
 
-#[derive(Debug)]
-pub struct CefComponent {}
+pub struct CefComponent {
+    view: Option<CefFrame>,
+}
 
 impl CefComponent {
     pub fn new() -> Self {
-        Self {}
+        Self { view: None }
     }
 
     pub fn get_window_info(
         &self,
         id: window::Id,
     ) -> Task<(window::Id, iced::Point, iced::Size, f32)> {
-        window::get_position(id)
+        window::position(id)
             .and_then(move |position| {
-                window::get_scale_factor(id).map(move |factor| (position, factor))
+                window::scale_factor(id).map(move |factor| (position, factor))
             })
             .then(move |(position, factor)| {
-                window::get_size(id).map(move |size| (position, size, factor))
+                window::size(id).map(move |size| (position, size, factor))
             })
             .map(move |(position, size, factor)| (id, position, size, factor))
     }
@@ -200,7 +189,8 @@ impl CefComponent {
 
         let mut windowinfo = cef::WindowInfo {
             windowless_rendering_enabled: true as _,
-            shared_texture_enabled: cfg!(feature = "hw-renderer") as _,
+            shared_texture_enabled: true as _,
+            //external_begin_frame_enabled: true as _,
             ..Default::default()
         };
 
@@ -294,7 +284,10 @@ impl CefComponent {
                 cef::do_message_loop_work();
                 CefAction::None
             }
-            CefMessage::UpdateView(browser_id) => CefAction::UpdateView(browser_id),
+            CefMessage::UpdateView(view) => {
+                self.view.replace(view);
+                CefAction::None
+            }
             CefMessage::Create(_window_id, url, position, size, device_scale_factor) => {
                 let launch_id = LaunchId::unique();
                 CefAction::Run(Self::launch_webview(
@@ -314,20 +307,25 @@ impl CefComponent {
 
                 CefAction::Created(browser_id)
             }
-            CefMessage::UpdateCaretOffset(browser_id, offset) => {
-                CefAction::Run(update_caret_offset::<Self>(browser_id, offset).discard())
-            }
-            CefMessage::EditableNodeFocused(browser_id, rect) => {
-                CefAction::Run(update_focused_editable_node::<Self>(browser_id, rect).discard())
-            }
+            CefMessage::UpdateCaretOffset(browser_id, offset) => CefAction::None,
+            CefMessage::EditableNodeFocused(browser_id, rect) => CefAction::None,
             CefMessage::Closed(browser_id) => CefAction::Closed(browser_id),
             CefMessage::Loaded(browwser_id) => CefAction::Loaded(browwser_id),
         }
     }
 
-    pub fn view(&self, browser_id: BrowserId) -> Element<'static, CefMessage> {
-        iced::widget::responsive(move |size| crate::webview::webview(browser_id, size).into())
+    pub fn view(&self) -> Element<'_, CefMessage> {
+        if let Some(view) = self.view.as_ref() {
+            iced::widget::responsive(|size| {
+                iced::widget::shader(view.clone())
+                    .width(size.width)
+                    .height(size.height)
+                    .into()
+            })
             .into()
+        } else {
+            iced::widget::space().into()
+        }
     }
 
     pub fn subscription(&self) -> Subscription<CefMessage> {

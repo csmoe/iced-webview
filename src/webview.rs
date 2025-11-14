@@ -1,7 +1,6 @@
 use super::instance::{get_cursor_type, resize};
 use crate::BrowserId;
 use cef::{ImplBrowser, ImplBrowserHost};
-use iced::advanced::widget;
 use iced::keyboard::key::Code;
 use iced::{self, keyboard::key::Physical};
 use iced::{
@@ -11,33 +10,12 @@ use iced::{
         layout::{Layout, Limits, Node},
         mouse::Click,
         renderer::Style,
-        widget::{Id, Operation, Tree, Widget, tree},
+        widget::{Operation, Tree, Widget, tree},
     },
     keyboard::{self, Key, key::Named},
     mouse::{self, Cursor},
-    widget::horizontal_space,
 };
 use iced_core;
-
-pub fn webview<'a, Message: 'a>(browser_id: BrowserId, size: iced::Size) -> Webview<'a, Message> {
-    #[cfg(not(feature = "hw-renderer"))]
-    let content = crate::instance::get_pixels::<Message>(browser_id).map_or_else(
-        || Element::from(horizontal_space().width(0)),
-        |img| img.width(size.width).height(size.height).into(),
-    );
-
-    #[cfg(feature = "hw-renderer")]
-    let content = crate::instance::get_shader::<Message>(browser_id).map_or_else(
-        || Element::from(horizontal_space().width(0)),
-        |shader| {
-            iced::widget::shader(shader)
-                .width(size.width)
-                .height(size.height)
-                .into()
-        },
-    );
-    Webview::new(browser_id, content)
-}
 
 struct CefState {
     last_click: Option<Click>,
@@ -56,13 +34,7 @@ impl CefState {
             return;
         }
 
-        let rect = cef::Rect {
-            x: bound.x as _,
-            y: bound.y as _,
-            width: bound.width as _,
-            height: bound.height as _,
-        };
-        resize(self.browser_id, rect);
+        resize(self.browser_id, bound);
     }
 
     fn close(&mut self) {
@@ -680,8 +652,8 @@ where
         vec![Tree::new(&self.content)]
     }
 
-    fn diff(&mut self, tree: &mut Tree) {
-        tree.diff_children(&mut [&mut self.content]);
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(&[&self.content]);
     }
 
     fn size(&self) -> Size<Length> {
@@ -752,6 +724,9 @@ where
                 }
             }
             Event::Window(iced::window::Event::RedrawRequested(_now)) => {
+                if let Some(browser_host) = &state.browser_host {
+                    browser_host.send_external_begin_frame();
+                }
                 shell.request_input_method::<String>(&state.input_method(bounds));
                 shell.request_redraw();
             }
@@ -859,91 +834,4 @@ where
     fn from(wrapper: Webview<'a, Message>) -> Self {
         Self::new(wrapper)
     }
-}
-
-pub fn update_caret_offset<T: Send + 'static>(
-    browser_id: BrowserId,
-    caret_offset: f32,
-) -> iced::Task<T> {
-    struct UpdateCaretOffset {
-        browser_id: BrowserId,
-        caret_offset: f32,
-    }
-
-    impl<T> Operation<T> for UpdateCaretOffset {
-        fn container(
-            &mut self,
-            _id: Option<&Id>,
-            _bounds: Rectangle,
-            operate_on_children: &mut dyn FnMut(&mut dyn Operation<T>),
-        ) {
-            operate_on_children(self);
-        }
-
-        fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn std::any::Any) {
-            if let Some(state) = state.downcast_mut::<CefState>() {
-                if self.browser_id == state.browser_id {
-                    state.set_caret_offset(self.caret_offset);
-                }
-            }
-        }
-    }
-    widget::operate(UpdateCaretOffset {
-        browser_id,
-        caret_offset,
-    })
-}
-
-pub fn update_focused_editable_node<T: Send + 'static>(
-    browser_id: BrowserId,
-    node: iced::Rectangle,
-) -> iced::Task<T> {
-    struct UpdateFocusedEditableNode {
-        browser_id: BrowserId,
-        node: iced::Rectangle,
-    }
-
-    impl<T> Operation<T> for UpdateFocusedEditableNode {
-        fn container(
-            &mut self,
-            _id: Option<&Id>,
-            _bounds: Rectangle,
-            operate_on_children: &mut dyn FnMut(&mut dyn Operation<T>),
-        ) {
-            operate_on_children(self);
-        }
-        fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn std::any::Any) {
-            if let Some(state) = state.downcast_mut::<CefState>() {
-                if self.browser_id == state.browser_id {
-                    state.set_focused_editable_node(self.node);
-                }
-            }
-        }
-    }
-    widget::operate(UpdateFocusedEditableNode { browser_id, node })
-}
-
-pub fn close_webview<T: Send + 'static>(browser_id: BrowserId) -> iced::Task<T> {
-    struct Close {
-        browser_id: BrowserId,
-    }
-
-    impl<T> Operation<T> for Close {
-        fn container(
-            &mut self,
-            _id: Option<&Id>,
-            _bounds: Rectangle,
-            operate_on_children: &mut dyn FnMut(&mut dyn Operation<T>),
-        ) {
-            operate_on_children(self);
-        }
-        fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn std::any::Any) {
-            if let Some(state) = state.downcast_mut::<CefState>() {
-                if self.browser_id == state.browser_id {
-                    state.close();
-                }
-            }
-        }
-    }
-    widget::operate(Close { browser_id })
 }

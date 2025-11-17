@@ -141,7 +141,7 @@ fn create_info_plist(
 //       - webview Helper.app
 // See https://bitbucket.org/chromiumembedded/cef/wiki/GeneralUsage.md#markdown-header-macos
 pub fn bundle() {
-    let example_path = PathBuf::from("./target/release/examples");
+    let example_path = PathBuf::from("./target/debug/examples");
     let main_app_path = create_app(
         &example_path,
         "webview",

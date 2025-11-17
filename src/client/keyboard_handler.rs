@@ -99,12 +99,14 @@ impl ImplKeyboardHandler for KeyboardHandlerBuilder {
             .focus_on_editable_field
             .borrow_mut() = event.focus_on_editable_field == 1;
         #[cfg(target_os = "macos")]
-        let ctrl =
-            event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN as u32) != 0;
+        let ctrl = cef::sys::cef_event_flags_t(event.modifiers)
+            & cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN
+            == cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN;
 
         #[cfg(not(target_os = "macos"))]
-        let ctrl =
-            event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_CONTROL_DOWN as u32) != 0;
+        let ctrl = cef::sys::cef_event_flags_t(event.modifiers)
+            & cef::sys::cef_event_flags_t::EVENTFLAG_CONTROL_DOWN
+            == cef::sys::cef_event_flags_t::EVENTFLAG_CONTROL_DOWN;
         if event.type_ == cef::sys::cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into() {
             match event.windows_key_code {
                 97 | 122 | 120 | 99 | 118 | 121 if ctrl => {
@@ -138,8 +140,9 @@ impl ImplKeyboardHandler for KeyboardHandlerBuilder {
             return false as _;
         };
         #[cfg(target_os = "macos")]
-        let ctrl =
-            event.modifiers & (cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN as u32) != 0;
+        let ctrl = cef::sys::cef_event_flags_t(event.modifiers)
+            & cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN
+            == cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN;
 
         #[cfg(not(target_os = "macos"))]
         let ctrl =

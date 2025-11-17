@@ -99,7 +99,7 @@ pub struct IcyClientHandlers {
 }
 
 pub enum CefIpcMessage {
-    EditableNodeFocused {
+    FocusedNodeChanged {
         browser_id: i32,
         x: f32,
         y: f32,
@@ -257,7 +257,7 @@ impl ImplClient for ClientBuilder {
                 return true as _;
             }
         }
-        if "renderer.editable_node_focused" == &event_name {
+        if "renderer.focused_node" == &event_name {
             if let Some(bound) = message.argument_list().map(|args| args.string(0)) {
                 #[derive(serde::Deserialize)]
                 struct Node {
@@ -279,7 +279,7 @@ impl ImplClient for ClientBuilder {
                 };
                 if let Err(err) = self
                     .process_message_tx
-                    .send(CefIpcMessage::EditableNodeFocused {
+                    .send(CefIpcMessage::FocusedNodeChanged {
                         browser_id: browser.identifier(),
                         x: x / 2.0,
                         y: y / 2.0,

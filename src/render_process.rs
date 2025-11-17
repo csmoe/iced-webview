@@ -126,38 +126,36 @@ impl ImplRenderProcessHandler for IcyRenderProcessHandlerBuilder {
         node: Option<&mut Domnode>,
     ) {
         if let Some(node) = node {
-            if node.is_editable() == 1 {
-                let bound = node.element_bounds();
+            let bound = node.element_bounds();
 
-                let Some(frame) = frame else {
-                    return;
-                };
-                let Some(mut message) = cef::process_message_create(Some(&cef::CefString::from(
-                    "renderer.editable_node_focused",
-                ))) else {
-                    return;
-                };
-                let Some(args) = message.argument_list() else {
-                    return;
-                };
-                let element =
+            let Some(frame) = frame else {
+                return;
+            };
+            let Some(mut message) =
+                cef::process_message_create(Some(&cef::CefString::from("renderer.focused_node")))
+            else {
+                return;
+            };
+            let Some(args) = message.argument_list() else {
+                return;
+            };
+            let element =
                     serde_json::to_string(&serde_json::json!({ "x": bound.x, "y": bound.y, "width": bound.height, "height": bound.width })).ok();
-                if args.set_string(
-                    0,
-                    element
-                        .as_ref()
-                        .map(|s| (&cef::CefStringUtf8::from(s.as_str())).into())
-                        .as_ref(),
-                ) != 1
-                {
-                    return;
-                }
-
-                frame.send_process_message(
-                    cef::sys::cef_process_id_t::PID_BROWSER.into(),
-                    Some(&mut message),
-                );
+            if args.set_string(
+                0,
+                element
+                    .as_ref()
+                    .map(|s| (&cef::CefStringUtf8::from(s.as_str())).into())
+                    .as_ref(),
+            ) != 1
+            {
+                return;
             }
+
+            frame.send_process_message(
+                cef::sys::cef_process_id_t::PID_BROWSER.into(),
+                Some(&mut message),
+            );
         }
     }
 

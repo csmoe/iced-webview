@@ -45,3 +45,6 @@ path = "examples/webview.rs"
 
 [profile.dev.package.objc2]
 debug-assertions = false
+
+[profile.release]
+debug = true

@@ -7,7 +7,11 @@
     "label": "debug example: webview",
     "adapter": "CodeLLDB",
     "request": "launch",
-    "program": "./target/release/examples/webview.app/Contents/MacOS/webview",
-    "args": ["--no-sandbox"]
+    "program": "./target/debug/examples/webview.app/Contents/MacOS/webview",
+    "args": ["--no-sandbox"],
+    "env": {
+      "TEST_URL": "https://docs.rs/iced"
+    },
+    "build": "macos"
   }
 ]

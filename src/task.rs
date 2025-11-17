@@ -8,11 +8,11 @@ use tokio::sync::oneshot;
 
 use crate::error::{CefError, Result};
 
-pub struct PostTaskFuture<T = ()> {
+pub(crate) struct PostTaskFuture<T = ()> {
     pub rx: oneshot::Receiver<anyhow::Result<T>>,
 }
 
-impl<T> Future for PostTaskFuture<T> {
+impl<T: FnOnce() + Send + 'static> Future for PostTaskFuture<T> {
     type Output = anyhow::Result<T>;
 
     fn poll(

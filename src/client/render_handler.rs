@@ -20,6 +20,10 @@ impl CefFrame {
     pub fn view(&self) -> wgpu::BindGroup {
         self.frame.clone()
     }
+
+    pub fn browser_id(&self) -> BrowserId {
+        self.browser_id
+    }
 }
 
 #[derive(Clone)]
@@ -179,14 +183,13 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         &self,
         browser: Option<&mut Browser>,
         type_: PaintElementType,
-        dirty_rects_count: usize,
-        dirty_rects: Option<&Rect>,
+        _dirty_rects: Option<&[Rect]>,
         info: Option<&AcceleratedPaintInfo>,
     ) {
         let Some(browser) = browser else {
             return;
         };
-        let Some(host) = browser.host() else {
+        let Some(_host) = browser.host() else {
             return;
         };
 
@@ -215,7 +218,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
 
             match shared_handle.import_texture(device) {
                 Ok(texture) => texture,
-                Err(err) => {
+                Err(_err) => {
                     return;
                 }
             }
@@ -322,8 +325,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         &self,
         browser: Option<&mut Browser>,
         type_: PaintElementType,
-        dirty_rects_count: usize,
-        dirty_rects: Option<&Rect>,
+        _dirty_rects: Option<&[Rect]>,
         buffer: *const u8,
         width: ::std::os::raw::c_int,
         height: ::std::os::raw::c_int,

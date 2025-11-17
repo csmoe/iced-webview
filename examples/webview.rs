@@ -71,7 +71,7 @@ impl Example {
                 .map(move |(id, position, size, factor)| {
                     CefMessage::Create(
                         id,
-                        "https://testufo.com".parse().unwrap(),
+                        "https://docs.rs/iced".parse().unwrap(),
                         position,
                         size,
                         factor,

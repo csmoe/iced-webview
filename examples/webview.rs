@@ -6,6 +6,7 @@ use iced_webview::{
     BrowserId, CefAction, CefComponent, CefMessage, IcyCefApp, init_cef, pre_init_cef,
 };
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 fn main() -> iced::Result {
@@ -26,14 +27,14 @@ fn main() -> iced::Result {
 }
 
 struct Example {
-    cef: CefComponent,
-    current_browser_id: Option<BrowserId>,
+    webviews: BTreeMap<window::Id, CefComponent>,
 }
 
 #[derive(Clone)]
 enum Message {
     WindowOpened(window::Id),
-    Cef(CefMessage),
+    NewWindow,
+    Cef(window::Id, CefMessage),
     CloseWindow(window::Id),
     PumpLoop(Duration),
 }
@@ -44,11 +45,14 @@ impl std::fmt::Debug for Message {
             Message::WindowOpened(window_id) => {
                 f.debug_tuple("WindowOpened").field(window_id).finish()
             }
-            Message::Cef(msg) => f.debug_tuple("Cef").field(msg).finish(),
+            Message::Cef(window_id, msg) => {
+                f.debug_tuple("Cef").field(window_id).field(msg).finish()
+            }
             Message::CloseWindow(window_id) => {
                 f.debug_tuple("CloseWindow").field(window_id).finish()
             }
             Message::PumpLoop(duration) => f.debug_tuple("PumpLoop").field(duration).finish(),
+            _ => f.debug_struct("Extra").finish(),
         }
     }
 }
@@ -58,8 +62,7 @@ impl Example {
         let (_, open) = window::open(window::Settings::default());
         (
             Self {
-                current_browser_id: None,
-                cef: CefComponent::new(),
+                webviews: Default::default(),
             },
             open.map(Message::WindowOpened),
         )
@@ -71,39 +74,50 @@ impl Example {
                 cef::do_message_loop_work();
                 Task::none()
             }
-            Message::WindowOpened(id) => self
-                .cef
-                .get_window_info(id)
-                .map(move |(id, position, size, factor)| {
-                    CefMessage::Create(
-                        id,
-                        "https://github.com".parse().unwrap(),
-                        position,
-                        size,
-                        factor,
-                    )
-                })
-                .map(Message::Cef),
+            Message::NewWindow => {
+                let (_, open) = window::open(window::Settings::default());
+                open.map(Message::WindowOpened)
+            }
+            Message::WindowOpened(id) => {
+                let cef = CefComponent::new();
+                self.webviews.insert(id, cef);
+                self.webviews
+                    .get(&id)
+                    .unwrap()
+                    .get_window_info(id)
+                    .map(move |(id, position, size, factor)| {
+                        CefMessage::Create(
+                            id,
+                            "https://github.com".parse().unwrap(),
+                            position,
+                            size,
+                            factor,
+                        )
+                    })
+                    .map(move |msg| Message::Cef(id, msg))
+            }
             Message::CloseWindow(_) => Task::none(),
-            Message::Cef(cef_message) => match self.cef.update(cef_message) {
-                CefAction::Created(browser_id) => {
-                    self.current_browser_id = Some(browser_id);
-                    Task::none()
+            Message::Cef(id, cef_message) => {
+                if let Some(webview) = self.webviews.get_mut(&id) {
+                    return match webview.update(cef_message) {
+                        CefAction::Created(browser_id) => Task::none(),
+                        CefAction::Run(task) => task.map(move |msg| Message::Cef(id, msg)),
+                        CefAction::Loaded(browser_id) => Task::none(),
+                        CefAction::Closed(browser_id) => {
+                            cef::shutdown();
+                            iced::exit()
+                        }
+                        CefAction::None => Task::none(),
+                    };
                 }
-                CefAction::Run(task) => task.map(Message::Cef),
-                CefAction::Loaded(browser_id) => Task::none(),
-                CefAction::Closed(browser_id) => {
-                    cef::shutdown();
-                    iced::exit()
-                }
-                CefAction::None => Task::none(),
-            },
+                Task::none()
+            }
         }
     }
 
     fn view(&self, id: window::Id) -> Element<'_, Message> {
-        if let Some(browser_id) = self.current_browser_id {
-            self.cef.view().map(Message::Cef).into()
+        if let Some(webview) = self.webviews.get(&id) {
+            webview.view().map(move |msg| Message::Cef(id, msg)).into()
         } else {
             iced::widget::space().width(0).into()
         }
@@ -115,6 +129,19 @@ impl Example {
             // tick the cef message loop at 60fps
             iced::time::every(std::time::Duration::from_millis(1000 / 17))
                 .map(|delay| Message::PumpLoop(delay.elapsed())),
+            iced::event::listen_with(|event, _, _| {
+                if matches!(
+                    event,
+                    iced::event::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
+                        ..
+                    })
+                ) {
+                    Some(Message::NewWindow)
+                } else {
+                    None
+                }
+            }),
         ])
     }
 }

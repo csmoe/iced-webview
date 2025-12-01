@@ -41,7 +41,6 @@ pub enum CefMessage {
     KeyEvent(iced::keyboard::Event),
     MouseEvent(iced::Point, iced::mouse::Event),
     InputMethodEvent(iced_core::input_method::Event),
-    PumpLoop(Duration),
     UpdateView(CefFrame),
 }
 
@@ -59,7 +58,6 @@ impl std::fmt::Debug for CefMessage {
             Self::Loaded(browser_id) => f.debug_tuple("Loaded").field(browser_id).finish(),
             Self::Created(browser_id) => f.debug_tuple("Created").field(browser_id).finish(),
             Self::Closed(browser_id) => f.debug_tuple("Closed").field(browser_id).finish(),
-            Self::PumpLoop(delay) => f.debug_tuple("PumpLoop").field(delay).finish(),
             Self::UpdateView(browser_id) => f.debug_tuple("UpdateView").field(browser_id).finish(),
             Self::UpdateCaretOffset(browser_id, offset) => f
                 .debug_tuple("UpdateCaretOffset")
@@ -130,20 +128,6 @@ pub(crate) fn remove_webview(browser_id: BrowserId) {
     });
 }
 
-pub(crate) fn get_pixels<Message>(browser_id: BrowserId) -> Option<iced::widget::Image> {
-    use iced::widget::image::Handle;
-    WEBVIEW_STATES.with_borrow(|states| {
-        states.get(&browser_id).map(|state| {
-            let (width, height) = state.render.size();
-            iced::widget::Image::new(Handle::from_rgba(
-                width as _,
-                height as _,
-                state.render.pixels().clone(),
-            ))
-        })
-    })
-}
-
 pub(crate) fn get_cursor_type(browser_id: BrowserId) -> Option<cef::CursorType> {
     WEBVIEW_STATES.with_borrow(|states| {
         states
@@ -175,6 +159,7 @@ pub(crate) fn resize(browser_id: BrowserId, bound: iced::Rectangle) {
 
 pub struct CefComponent {
     view: Option<CefFrame>,
+    host: Option<BrowserHost>,
     focused_node: Option<iced::Rectangle>,
     caret_offset: Option<f32>,
     last_click: Option<Click>,
@@ -189,6 +174,7 @@ impl CefComponent {
             caret_offset: None,
             last_click: None,
             last_button_modifiers: 0,
+            host: None,
         }
     }
 
@@ -506,7 +492,7 @@ impl CefComponent {
         let mut windowinfo = cef::WindowInfo {
             windowless_rendering_enabled: true as _,
             shared_texture_enabled: true as _,
-            //external_begin_frame_enabled: true as _,
+            external_begin_frame_enabled: true as _,
             ..Default::default()
         };
 
@@ -563,14 +549,6 @@ impl CefComponent {
                     LifeSpanEvent::Created { browser_id } => CefMessage::Created(browser_id),
                 },
             ),
-            Task::stream(
-                UnboundedReceiverStream::new(load_rx).map(move |msg| match msg {
-                    LoadEvent::Start { .. } => CefMessage::PumpLoop(Duration::from_secs(1)),
-                    LoadEvent::Changed { .. } => CefMessage::PumpLoop(Duration::from_secs(1)),
-                    LoadEvent::End { .. } => CefMessage::PumpLoop(Duration::from_secs(1)),
-                    LoadEvent::Error { .. } => CefMessage::PumpLoop(Duration::from_secs(1)),
-                }),
-            ),
             Task::stream(UnboundedReceiverStream::new(process_message_rx)).map(|msg| match msg {
                 crate::client::CefIpcMessage::FocusedNodeChanged {
                     browser_id,
@@ -596,10 +574,6 @@ impl CefComponent {
 
     pub fn update(&mut self, action: CefMessage) -> CefAction {
         match action {
-            CefMessage::PumpLoop(_delay) => {
-                cef::do_message_loop_work();
-                CefAction::None
-            }
             CefMessage::InputMethodEvent(event) => {
                 self.send_ime_event(event, self.caret_offset);
                 CefAction::None
@@ -632,6 +606,12 @@ impl CefComponent {
             }
             CefMessage::Created(browser_id) => {
                 tracing::info!(?browser_id, "created");
+                if let Some(host) = cef::browser_host_get_browser_by_identifier(browser_id.inner())
+                    .and_then(|b| b.host())
+                {
+                    host.send_external_begin_frame();
+                    self.host.replace(host);
+                }
 
                 CefAction::Created(browser_id)
             }
@@ -666,6 +646,9 @@ impl CefComponent {
             })
             .into()
         } else {
+            if let Some(host) = self.host.as_ref() {
+                host.send_external_begin_frame();
+            }
             iced::widget::space().into()
         }
     }

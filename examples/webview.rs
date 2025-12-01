@@ -35,6 +35,7 @@ enum Message {
     WindowOpened(window::Id),
     Cef(CefMessage),
     CloseWindow(window::Id),
+    PumpLoop(Duration),
 }
 
 impl std::fmt::Debug for Message {
@@ -47,6 +48,7 @@ impl std::fmt::Debug for Message {
             Message::CloseWindow(window_id) => {
                 f.debug_tuple("CloseWindow").field(window_id).finish()
             }
+            Message::PumpLoop(duration) => f.debug_tuple("PumpLoop").field(duration).finish(),
         }
     }
 }
@@ -65,13 +67,17 @@ impl Example {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::PumpLoop(_) => {
+                cef::do_message_loop_work();
+                Task::none()
+            }
             Message::WindowOpened(id) => self
                 .cef
                 .get_window_info(id)
                 .map(move |(id, position, size, factor)| {
                     CefMessage::Create(
                         id,
-                        "https://docs.rs/iced".parse().unwrap(),
+                        "https://github.com".parse().unwrap(),
                         position,
                         size,
                         factor,
@@ -108,7 +114,7 @@ impl Example {
             window::close_events().map(Message::CloseWindow),
             // tick the cef message loop at 60fps
             iced::time::every(std::time::Duration::from_millis(1000 / 17))
-                .map(|delay| Message::Cef(CefMessage::PumpLoop(delay.elapsed()))),
+                .map(|delay| Message::PumpLoop(delay.elapsed())),
         ])
     }
 }

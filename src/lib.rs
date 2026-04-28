@@ -1,5 +1,6 @@
 mod browser;
 mod client;
+mod convert;
 mod error;
 mod instance;
 /// Running in non-browser process

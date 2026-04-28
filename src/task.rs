@@ -12,7 +12,7 @@ pub(crate) struct PostTaskFuture<T = ()> {
     pub rx: oneshot::Receiver<anyhow::Result<T>>,
 }
 
-impl<T: FnOnce() + Send + 'static> Future for PostTaskFuture<T> {
+impl<T> Future for PostTaskFuture<T> {
     type Output = anyhow::Result<T>;
 
     fn poll(
@@ -128,12 +128,12 @@ macro_rules! post_task_async {
         use futures::future::FutureExt;
         use std::future::IntoFuture;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        match crate::webview::task::cef_post_delayed_task($id, move || {
+        match $crate::task::cef_post_delayed_task($id, $delay, move || {
             let ret = (|| -> anyhow::Result<()> {
                 $($body)*
             })();
             let _ = tx.send(ret);
-        }, $delay) {
+        }) {
             Ok(_) => $crate::task::PostTaskFuture { rx }.into_future().left_future(),
             Err(e) => std::future::ready(Err(anyhow::Error::new(e))).right_future()
         }
@@ -143,7 +143,7 @@ macro_rules! post_task_async {
         use futures::future::FutureExt;
         use std::future::IntoFuture;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        match crate::webview::task::cef_post_task($id, move || {
+        match $crate::task::cef_post_task($id, move || {
             let ret = (|| -> anyhow::Result<()> {
                 $($body)*
             })();

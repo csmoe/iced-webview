@@ -1,3 +1,4 @@
+use arc_swap::ArcSwapOption;
 use cef::{self, DisplayHandler, ImplBrowser};
 use cef::{
     Client, ContextMenuHandler, ImplClient, ImplProcessMessage, KeyboardHandler, LifeSpanHandler,
@@ -6,18 +7,26 @@ use cef::{
     sys,
 };
 use context_menu_handler::{ContextMenuHandlerBuilder, IcyContextMenuHandler};
-use keyboard_handler::{IcyKeyboardHandler, IcyKeyboardState, KeyboardHandlerBuilder};
+pub use display_handler::DisplayEvent;
+use display_handler::{DisplayHandlerBuilder, IcyDisplayHandler};
+use keyboard_handler::{IcyKeyboardHandler, KeyboardHandlerBuilder};
+pub use lifespan_handler::LifeSpanEvent;
 use lifespan_handler::{IcyLifeSpanHandler, LifeSpanHandlerBuilder};
-
+pub use load_handler::LoadEvent;
 use load_handler::{IcyLoadHandler, LoadHandlerBuilder};
+pub(crate) use render_handler::{CefView, CefViewWrapper};
 use render_handler::{IcyRenderHandler, IcyRenderState, RenderHandlerBuilder};
-use std::ptr::null_mut;
-use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, unbounded_channel};
-
-use crate::{
-    client::display_handler::{DisplayHandlerBuilder, IcyDisplayHandler, IcyDisplayState},
-    instance::LaunchId,
+use std::{
+    ptr::null_mut,
+    sync::{Arc, Mutex},
 };
+use tokio::sync::{
+    mpsc::{Receiver, UnboundedReceiver, UnboundedSender, unbounded_channel},
+    oneshot,
+};
+
+use crate::{BrowserId, instance::LaunchId};
+
 mod context_menu_handler;
 mod display_handler;
 mod keyboard_handler;
@@ -25,16 +34,183 @@ mod lifespan_handler;
 mod load_handler;
 mod render_handler;
 
-pub use lifespan_handler::LifeSpanEvent;
-pub use load_handler::LoadEvent;
-
-pub use render_handler::CefFrame;
-
 pub struct ClientEventSubscriber {
     pub lifespan_rx: Receiver<LifeSpanEvent>,
     pub load_rx: UnboundedReceiver<LoadEvent>,
     pub process_message_rx: UnboundedReceiver<CefIpcMessage>,
-    pub render_rx: UnboundedReceiver<CefFrame>,
+    pub render_rx: UnboundedReceiver<BrowserId>,
+    pub display_rx: UnboundedReceiver<DisplayEvent>,
+}
+
+impl std::fmt::Debug for ClientEventSubscriber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientEventSubscriber")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RelayEvent {
+    pub msg: crate::CefMessage,
+    pub lifecycle: bool,
+}
+
+pub type SubscriberDepositor = Arc<Mutex<Option<oneshot::Sender<ClientEventSubscriber>>>>;
+
+pub struct CefSubscriptionRecipe {
+    pub id: crate::instance::LaunchId,
+    pub relay_tx: tokio::sync::broadcast::Sender<RelayEvent>,
+}
+
+impl iced::advanced::subscription::Recipe for CefSubscriptionRecipe {
+    type Output = crate::CefMessage;
+
+    fn hash(&self, state: &mut iced::advanced::subscription::Hasher) {
+        use std::hash::Hash;
+        std::any::TypeId::of::<Self>().hash(state);
+        self.id.hash(state);
+    }
+
+    fn stream(
+        self: Box<Self>,
+        _input: std::pin::Pin<
+            Box<dyn tokio_stream::Stream<Item = iced::advanced::subscription::Event> + Send>,
+        >,
+    ) -> std::pin::Pin<Box<dyn tokio_stream::Stream<Item = crate::CefMessage> + Send>> {
+        let mut rx = self.relay_tx.subscribe();
+        let (tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(relay_event) => {
+                        if tx.send(relay_event.msg).is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(
+            output_rx,
+        ))
+    }
+}
+
+impl ClientEventSubscriber {
+    pub(crate) fn into_stream(
+        self,
+    ) -> impl tokio_stream::Stream<Item = RelayEvent> + Send + 'static {
+        use tokio_stream::StreamExt;
+
+        let ClientEventSubscriber {
+            lifespan_rx,
+            load_rx,
+            mut process_message_rx,
+            render_rx,
+            display_rx,
+        } = self;
+
+        let (inner_tx, inner_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(msg) = process_message_rx.recv().await {
+                let msg = match msg {
+                    CefIpcMessage::FocusedNodeChanged {
+                        browser_id,
+                        x,
+                        y,
+                        width,
+                        height,
+                    } => crate::CefMessage::FocusedNodeChanged(
+                        browser_id.into(),
+                        iced::Rectangle {
+                            x: x as _,
+                            y: y as _,
+                            width: width as _,
+                            height: height as _,
+                        },
+                    ),
+                    CefIpcMessage::CaretPositionChanged { browser_id, offset } => {
+                        crate::CefMessage::UpdateCaretOffset(browser_id.into(), offset)
+                    }
+                };
+                let _ = inner_tx.send(msg);
+            }
+        });
+
+        let streams: Vec<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = RelayEvent> + Send>>> = vec![
+            Box::pin(
+                tokio_stream::wrappers::ReceiverStream::new(lifespan_rx).map(|event| RelayEvent {
+                    msg: match event {
+                        LifeSpanEvent::Closed { browser_id } => {
+                            crate::CefMessage::Closed(browser_id)
+                        }
+                        LifeSpanEvent::Created { browser_id, .. } => {
+                            crate::CefMessage::Created(browser_id)
+                        }
+                        LifeSpanEvent::CreatePopup { browser_id, .. } => {
+                            crate::CefMessage::UpdateView(browser_id)
+                        }
+                    },
+                    lifecycle: true,
+                }),
+            ),
+            Box::pin(
+                tokio_stream::wrappers::UnboundedReceiverStream::new(load_rx).map(|event| {
+                    RelayEvent {
+                        msg: match event {
+                            LoadEvent::End { browser_id, .. } => {
+                                crate::CefMessage::Loaded(browser_id)
+                            }
+                            LoadEvent::Changed { browser_id, .. }
+                            | LoadEvent::Start { browser_id, .. }
+                            | LoadEvent::Error { browser_id, .. } => {
+                                crate::CefMessage::UpdateView(browser_id)
+                            }
+                        },
+                        lifecycle: true,
+                    }
+                }),
+            ),
+            Box::pin(
+                tokio_stream::wrappers::UnboundedReceiverStream::new(render_rx).map(|browser_id| {
+                    RelayEvent {
+                        msg: crate::CefMessage::UpdateView(browser_id),
+                        lifecycle: false,
+                    }
+                }),
+            ),
+            Box::pin(
+                tokio_stream::wrappers::UnboundedReceiverStream::new(display_rx).map(|event| {
+                    match event {
+                        DisplayEvent::CursorChanged {
+                            browser_id,
+                            cursor_type,
+                        } => RelayEvent {
+                            msg: crate::CefMessage::CursorChanged(browser_id, cursor_type),
+                            lifecycle: false,
+                        },
+                        DisplayEvent::TitleChanged { browser_id, .. }
+                        | DisplayEvent::UrlChanged { browser_id, .. } => RelayEvent {
+                            msg: crate::CefMessage::UpdateView(browser_id),
+                            lifecycle: true,
+                        },
+                    }
+                }),
+            ),
+            Box::pin(
+                tokio_stream::wrappers::UnboundedReceiverStream::new(inner_rx).map(|msg| {
+                    RelayEvent {
+                        msg,
+                        lifecycle: false,
+                    }
+                }),
+            ),
+        ];
+
+        futures::stream::select_all(streams)
+    }
 }
 
 pub struct IcyClient {
@@ -45,8 +221,6 @@ pub struct IcyClient {
 #[derive(Clone, Debug)]
 pub struct IcyClientState {
     pub render: IcyRenderState,
-    pub keyboard: IcyKeyboardState,
-    pub display: IcyDisplayState,
 }
 
 impl IcyClient {
@@ -54,33 +228,42 @@ impl IcyClient {
         launch_id: LaunchId,
         device_scale_factor: f32,
         view_rect: cef::Rect,
+        hw_view: Arc<ArcSwapOption<CefView>>,
+        popup_view: Arc<ArcSwapOption<CefView>>,
+        native_window: Option<isize>,
     ) -> (Self, IcyClientHandlers) {
         let (load_handler, load_rx) = IcyLoadHandler::new();
-        let (display_handler, display_state) = IcyDisplayHandler::new();
-        let (render_handler, render_state, render_rx) =
-            IcyRenderHandler::new(device_scale_factor, view_rect);
+        let (display_handler, display_rx) = IcyDisplayHandler::new();
+        let (render_handler, render_state, render_rx, _drag_rx, _ime_composition_rx) =
+            IcyRenderHandler::new(
+                device_scale_factor,
+                view_rect,
+                hw_view,
+                popup_view,
+                native_window,
+            );
         let (lifespan_handler, lifespan_rx) = IcyLifeSpanHandler::new(launch_id);
         let context_menu_handler = IcyContextMenuHandler::new();
-        let (keyboard_handler, keyboard_state) = IcyKeyboardHandler::new();
+        let keyboard_handler = IcyKeyboardHandler::new();
         let (process_message_tx, process_message_rx) = unbounded_channel();
+
         let state = IcyClientState {
             render: render_state,
-            keyboard: keyboard_state,
-            display: display_state,
         };
         let subscribers = ClientEventSubscriber {
             lifespan_rx,
             load_rx,
-            render_rx,
             process_message_rx,
+            render_rx,
+            display_rx,
         };
         let handlers = IcyClientHandlers {
             load_handler,
             lifespan_handler,
             render_handler,
             context_menu_handler,
-            display_handler,
             keyboard_handler,
+            display_handler,
             process_message_tx,
         };
         (Self { state, subscribers }, handlers)
@@ -118,8 +301,8 @@ pub(crate) struct ClientBuilder {
     lifespan_handler: LifeSpanHandler,
     render_handler: RenderHandler,
     context_menu_handler: ContextMenuHandler,
-    display_handler: DisplayHandler,
     keyboard_handler: KeyboardHandler,
+    display_handler: DisplayHandler,
     process_message_tx: UnboundedSender<CefIpcMessage>,
 }
 
@@ -292,6 +475,6 @@ impl ImplClient for ClientBuilder {
                 return true as _;
             }
         }
-        return false as _;
+        false as _
     }
 }

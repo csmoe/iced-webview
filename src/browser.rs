@@ -121,6 +121,8 @@ impl ImplApp for AppBuilder {
             return;
         };
 
+        command_line.append_switch(Some(&"disable-stack-profiler".into()));
+        command_line.append_switch(Some(&"disable-gaia-services".into()));
         command_line.append_switch(Some(&"disable-javascript-open-windows".into()));
         command_line.append_switch(Some(&"disable-web-security".into()));
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
@@ -130,11 +132,51 @@ impl ImplApp for AppBuilder {
         command_line.append_switch(Some(&"disable-popup-blocking".into()));
         command_line.append_switch(Some(&"noerrdialogs".into()));
         command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
+        command_line.append_switch(Some(&"force-light-mode".into()));
         command_line.append_switch(Some(&"use-mock-keychain".into()));
         command_line.append_switch(Some(&"disable-spell-checking".into()));
+        command_line.append_switch(Some(&"enable-main-frame-before-activation".into()));
         command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
         command_line
-            .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
+            .append_switch_with_value(Some(&"num-raster-threads".into()), Some(&"4".into()));
+        command_line.append_switch_with_value(Some(&"lang".into()), Some(&"zh-CN".into()));
+        command_line.append_switch_with_value(Some(&"locale".into()), Some(&"zh_CN".into()));
+
+        #[cfg(target_vendor = "win7")]
+        {
+            command_line.append_switch(Some(&"disable-gpu".into()));
+            command_line.append_switch(Some(&"disable-gpu-compositing".into()));
+        }
+
+        #[cfg(not(debug_assertions))]
+        {
+            command_line.remove_switch(Some(&"remote-debugging-port".into()));
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            command_line.append_switch_with_value(
+                Some(&"remote-debugging-port".into()),
+                Some(&"9229".into()),
+            );
+            command_line.append_switch(Some(&"enable-logging".into()));
+        }
+
+        let disabled_features = command_line.switch_value(Some(&"disable-features".into()));
+        let disabled_features =
+            "AutoCloseFileDialogs,OptimizationGuideOnDeviceModel,OnDeviceModelService,GCM,SpareRendererForSitePerProcess"
+                .to_string()
+                + ","
+                + cef::CefString::from(&disabled_features).to_string().as_str();
+
+        command_line.append_switch_with_value(
+            Some(&"disable-features".into()),
+            Some(&disabled_features.as_str().into()),
+        );
+        command_line.append_switch_with_value(
+            Some(&"enable-features".into()),
+            Some(&"ClipboardUnsanitizedData".into()),
+        );
         tracing::info!("pre-set command line done");
     }
 
@@ -224,6 +266,7 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
         command_line.append_switch(Some(&"ignore-certificate-errors".into()));
         command_line.append_switch(Some(&"ignore-ssl-errors".into()));
+        command_line.append_switch(Some(&"disable-gpu-sandbox".into()));
     }
 
     fn on_schedule_message_pump_work(&self, delay_ms: i64) {
